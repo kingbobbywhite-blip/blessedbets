@@ -170,12 +170,51 @@ export interface DailyPicks {
   }
 }
 
+/**
+ * The hit rate each side has to show to be a pick'em play.
+ *
+ * Normally both are the bar: a leg is a leg, and the payout table does not
+ * care which way it points. The under can carry a margin on top, set in
+ * Settings per league, for one reason: the person playing these has found
+ * unders hitting below what they were priced at, in the NBA in particular.
+ * It was raised over an entry of four NBA unders on 1 November 2026, where
+ * Jeremiah Fears went for 13 assists against 3.5 and Donovan Clingan passed
+ * 10.5 points with four minutes left in a 21-point game.
+ *
+ * Two of four is not evidence, and nothing here pretends it is. What makes the
+ * margin safe to have is its direction. It cannot invent an edge — it only
+ * ever turns a play into a pass — and it moves no probability: every chance on
+ * screen is still the market's. The tracker's overs-and-unders record is where
+ * it gets tested, against the bar those legs actually needed.
+ */
+export interface SideBars {
+  over: number
+  under: number
+}
+
+/** The bar for each side, with the under's margin added. A negative margin is treated as none. */
+export function sideBars(bar: number, underMargin = 0): SideBars {
+  return { over: bar, under: Math.min(0.99, bar + Math.max(0, underMargin)) }
+}
+
+const asBars = (b: number | SideBars): SideBars => (typeof b === "number" ? { over: b, under: b } : b)
+
+/** The bar the given side has to clear. */
+export function barFor(bars: SideBars, side: "OVER" | "UNDER"): number {
+  return side === "OVER" ? bars.over : bars.under
+}
+
 export interface BuildOptions {
   value: ValueBetSettings
   correlation: CorrelationSettings
   constraints: OptimizerConstraints
   /** Per-leg hit rate a pick'em entry needs, used to place the DFS targets. */
   dfsBreakEven: number
+  /**
+   * How much more an UNDER has to clear, on top of the bar. See SideBars.
+   * Zero or absent leaves both sides at the bar.
+   */
+  underMargin?: number
   /**
    * The most lopsided a pick'em pick can be and still be assumed to exist.
    * See PICKEM_MAX_PROB, which is the default. 1 keeps everything.
@@ -245,7 +284,7 @@ export function summariseGames(quotes: FeedQuote[]): GameSummary[] {
 export function dfsTargetsFor(
   mean: number,
   distribution: { pAtLeast(k: number): number; pmf(k: number): number; variance?: number },
-  breakEven: number,
+  breakEven: number | SideBars,
   opts: {
     /**
      * The lines the books are actually hanging for this prop. Given these, the
@@ -286,6 +325,7 @@ export function dfsTargetsFor(
   // different number, and capped at 25 units so a yardage market stays a
   // readable ladder. Without posted lines (a caller pricing a hypothetical)
   // it falls back to the old fixed window.
+  const bars = asBars(breakEven)
   const sd = Math.sqrt(Math.max(distribution.variance ?? 0, 0))
   const posted = (opts.postedLines ?? []).filter((l) => Number.isFinite(l))
   let lo: number
@@ -337,12 +377,13 @@ export function dfsTargetsFor(
     // is already excluded from both probabilities and a whole number therefore
     // has to clear the bar on strictly beating the number — which is the
     // honest bar for a leg that can be voided.
-    if (over >= breakEven && (overAt == null || step > overAt)) {
+    if (over >= bars.over && (overAt == null || step > overAt)) {
       overAt = step
       overProb = over
     }
-    // Lowest line where the under still clears.
-    if (under >= breakEven && (underAt == null || step < underAt)) {
+    // Lowest line where the under still clears — its own bar, which may carry
+    // a margin the over's does not.
+    if (under >= bars.under && (underAt == null || step < underAt)) {
       underAt = step
       underProb = under
     }
@@ -626,7 +667,10 @@ export function buildDfsBoard(quotes: FeedQuote[], opts: BuildOptions): DfsBoard
     // agree: with no market-making book, the retail books' as well as the
     // consensus's. See linePrices.
     const prices = (line: number) => linePrices(ref, line)
-    const t = dfsTargetsFor(ref.mean, ref.distribution, opts.dfsBreakEven, { postedLines, prices })
+    const t = dfsTargetsFor(ref.mean, ref.distribution, sideBars(opts.dfsBreakEven, opts.underMargin), {
+      postedLines,
+      prices,
+    })
     // A prop where neither side clears is not a target, it is a pass.
     if (t.overAt == null && t.underAt == null) continue
 
@@ -834,21 +878,28 @@ export function appPlay(
 export function appVerdict(
   t: Pick<DfsTarget, "appLines">,
   app: string,
-  bar: number,
+  bar: number | SideBars,
 ): { line: number; side: "OVER" | "UNDER" | null; prob: number | null; reason: string | null } | null {
+  const bars = asBars(bar)
   const lines = (t.appLines ?? []).filter((l) => l.app === app && l.pickType === "standard")
   if (lines.length === 0) return null
   const play = appPlay(t, app)
-  if (play && play.prob >= bar) return { line: play.line, side: play.side, prob: play.prob, reason: null }
+  if (play && play.prob >= barFor(bars, play.side)) return { line: play.line, side: play.side, prob: play.prob, reason: null }
   const l = lines.find((x) => x.line === play?.line) ?? lines[0]
   const favoured = l.over >= l.under ? "over" : "under"
   const offered = favoured === "over" ? l.overOffered : l.underOffered
   const multiplier = favoured === "over" ? l.overMultiplier : l.underMultiplier
+  // An under that clears the bar and not the margin on top of it is a pass
+  // for a reason of your own making, and the row should say that rather than
+  // "neither side clears", which would be false at the bar itself.
+  const heldBack = play?.side === "UNDER" && play.prob >= bars.over && play.prob < bars.under
   const reason = !offered
     ? `the ${favoured} is not offered`
     : multiplier != null
       ? `the ${favoured} pays ×${multiplier}, which needs its own bar`
-      : "neither side clears"
+      : heldBack
+        ? `the under clears the bar but not your margin for unders (needs ${Math.round(bars.under * 1000) / 10}%)`
+        : "neither side clears"
   return { line: l.line, side: null, prob: null, reason }
 }
 
@@ -872,19 +923,23 @@ export function hasAppLines(targets: Pick<DfsTarget, "appLines">[], app: string 
 export function buildPickemEntry(
   targets: DfsTarget[],
   size: number,
-  bar: number,
+  bar: number | SideBars,
   maxPerGame = 2,
   app?: string | null,
   now: number = Date.now(),
 ): PickemLeg[] | null {
   const { plays } = pickemPlays(targets, app, now)
+  const bars = asBars(bar)
 
   const legs: PickemLeg[] = []
   const players = new Set<string>()
   const games = new Map<string, number>()
   for (const play of plays.sort((a, b) => b.prob - a.prob)) {
     if (legs.length >= size) break
-    if (play.prob < bar) break
+    // Sorted by chance, so below the lower of the two bars nothing further
+    // can clear; between them, only an over can.
+    if (play.prob < Math.min(bars.over, bars.under)) break
+    if (play.prob < barFor(bars, play.side)) continue
     const t = play.target
     // Per player, not per name: two same-named players in different games are
     // two people, and the second must not be excluded as a duplicate.

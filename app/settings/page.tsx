@@ -477,6 +477,21 @@ export default function SettingsPage() {
                 }
               />
               <SliderRow
+                label={`${dailyLeague.short} unders: extra margin`}
+                value={s.daily.underMargin[s.daily.league] ?? 0}
+                min={0}
+                max={0.1}
+                step={0.005}
+                format={(v) => (v <= 0 ? "none" : `+${(v * 100).toFixed(1)} pts`)}
+                onChange={(v) =>
+                  setSettings((p) => ({
+                    ...p,
+                    daily: { ...p.daily, underMargin: { ...p.daily.underMargin, [p.daily.league]: v } },
+                  }))
+                }
+                hint={`How much more an ${dailyLeague.short} under has to clear in pick'em, on top of the bar: at +3 points a 56% bar asks 59% of an under and still 56% of an over. It only ever turns a play into a pass and never moves a probability, so it cannot make anything look better than the market says. The NBA starts at +3 because that is your experience of NBA unders, not a measured number; the tracker's overs-and-unders record shows whether your results back it, against the bar those legs actually needed. Set per league: this is the ${dailyLeague.label} tab's.`}
+              />
+              <SliderRow
                 label="Parlay legs"
                 value={s.daily.parlayLegs}
                 min={2}

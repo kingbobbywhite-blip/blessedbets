@@ -204,8 +204,20 @@ export function LogEntry({ onDone }: { onDone?: () => void }) {
       if (leagueRead) setLeague(leagueRead)
       // "Points" on an NHL screen is hockey points, not basketball's.
       setLegs(leagueRead ? inSport(found, leagueRead) : found)
+      // The ring round each player says hit or missed once the leg is decided.
+      // Say how many it settled, so a leg left open is a prompt rather than a
+      // silent gap in the record by side.
+      const decided = found.filter((l) => l.result === "WIN" || l.result === "LOSS").length
       if (found.length === 0) toast.error("No legs read from that screenshot", { description: "Type them in instead." })
-      else toast.success(`Read ${found.length} legs`, { description: "Check each one and set what happened." })
+      else
+        toast.success(`Read ${found.length} legs`, {
+          description:
+            decided === found.length
+              ? "Each result was read off the player's ring. Check them against the screen."
+              : decided > 0
+                ? `${decided} results read off the players' rings; set the rest.`
+                : "Check each one and set what happened.",
+        })
     } catch (err) {
       toast.error("Could not read the screenshot", { description: err instanceof Error ? err.message : String(err) })
     } finally {

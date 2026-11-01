@@ -40,7 +40,7 @@ import {
   type CapturedPayout,
 } from "@/lib/quant/payouts"
 import type { FeedQuote } from "@/lib/quant/valuebets"
-import { buildPickemEntry, hasAppLines, pickemPlays, upcomingQuotes } from "@/lib/today/build"
+import { buildPickemEntry, hasAppLines, pickemPlays, sideBars, upcomingQuotes } from "@/lib/today/build"
 import { useDailyPicks, type PickInputs } from "@/hooks/use-daily-picks"
 import { snapshotFor } from "@/lib/quant/lines"
 import { entryExpectation } from "@/lib/tracker/entries"
@@ -271,6 +271,11 @@ export default function TodayPage() {
     () => pickemBar(entryApp, entryMode, s.constraints.picks, savedPayout, offered),
     [entryApp, entryMode, s.constraints.picks, savedPayout, offered],
   )
+  // The same bar for each side: an under in this league may have to clear a
+  // margin on top, set in Settings. It turns plays into passes and moves no
+  // probability. See SideBars.
+  const underMargin = s.daily.underMargin[leagueId] ?? 0
+  const bars = React.useMemo(() => sideBars(bar.prob, underMargin), [bar.prob, underMargin])
   // An expected value is the table's number as much as the legs', so it is
   // withheld when no table has been checked. Null here is the point.
   const pricingMode = React.useMemo(
@@ -301,13 +306,14 @@ export default function TodayPage() {
         correlation: s.correlation ?? DEFAULT_CORRELATION,
         constraints: { ...s.constraints, picks: s.daily.parlayLegs },
         dfsBreakEven: bar.prob,
+        underMargin,
         pickemMaxProb: s.daily.pickemMaxProb,
         parlayCount: 4,
         bettableBooks: s.oddsFeed.bettable,
         pickemLines,
       },
     }
-  }, [daily, upcoming, pickemLines, leagueId, s.projection, s.daily, s.correlation, s.constraints, bar.prob, s.oddsFeed.bettable, s.apps])
+  }, [daily, upcoming, pickemLines, leagueId, s.projection, s.daily, s.correlation, s.constraints, bar.prob, underMargin, s.oddsFeed.bettable, s.apps])
   const built = useDailyPicks(pickInputs)
   // Picks are shown only while the pull they were built from is the one on
   // screen: never another league's, never a pull a refresh has replaced, and
@@ -323,8 +329,8 @@ export default function TodayPage() {
 
   // A ready-to-play pick'em entry at the default app's size and table.
   const entry = React.useMemo(
-    () => (picks ? buildPickemEntry(picks.dfsTargets, s.constraints.picks, bar.prob, 2, s.defaultAppId, now) : null),
-    [picks, s.constraints.picks, bar.prob, s.defaultAppId, now],
+    () => (picks ? buildPickemEntry(picks.dfsTargets, s.constraints.picks, bars, 2, s.defaultAppId, now) : null),
+    [picks, s.constraints.picks, bars, s.defaultAppId, now],
   )
   // What the entry could not use, and why. An entry at the app's own lines
   // leaves out every prop it has no line for, and the difference between "the
@@ -966,6 +972,7 @@ export default function TodayPage() {
                     Fewer than {s.constraints.picks} props clear the {pct(bar.prob)} bar on this slate, one per
                     player{appLinesLive ? `, at the lines ${entryApp?.name ?? "the app"} is actually posting` : ""}.
                     Padding the entry with coin flips is the bet the bar exists to stop: play a smaller entry, or pass.
+                    {underMargin > 0 ? ` Unders have to clear ${pct(bars.under)}, with your margin on ${league.short} unders.` : ""}
                     {appLinesLive && leftOutText ? ` ${leftOutText}` : ""}
                     {bar.source === "placeholder"
                       ? ` That bar is a placeholder, not a table: no stored payout covers a ${s.constraints.picks}-pick ${entryMode?.label ?? "entry"}.`
@@ -1016,6 +1023,9 @@ export default function TodayPage() {
                   of the two always loses. The bar is a {pct(bar.prob)} per-leg hit rate, from your default{" "}
                   {s.constraints.picks}-pick entry, for standard picks; a goblin or demon pays differently and needs
                   its own bar.
+                  {underMargin > 0
+                    ? ` An under here has to clear ${pct(bars.under)}: the bar plus the ${(underMargin * 100).toFixed(1)}-point margin on ${league.short} unders you set in Settings. It moves no probability, only which side is a pass, and the tracker's overs-and-unders record is where it gets tested.`
+                    : ""}
                   {bar.source === "tracked" && bar.tracked
                     ? ` It is set at ${bar.tracked.multiple}x, the lowest "if every leg hits" payout among your last ${bar.tracked.entries} logged ${entryApp?.name ?? ""} ${s.constraints.picks}-pick entries of standard picks, rather than the stored table's: the multiplier varies from entry to entry, and a leg has to clear the bar at the payout it may actually get.`
                     : ""}
@@ -1045,7 +1055,7 @@ export default function TodayPage() {
                     </thead>
                     <tbody>
                       {shownTargets.map((t) => (
-                        <DfsTargetRow key={t.key} t={t} bar={bar.prob} app={s.defaultAppId} />
+                        <DfsTargetRow key={t.key} t={t} bar={bars} app={s.defaultAppId} />
                       ))}
                     </tbody>
                   </table>

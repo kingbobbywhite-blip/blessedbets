@@ -8,6 +8,8 @@ import {
   legsFromText,
   nightReviews,
   openExposure,
+  compareSides,
+  recordBySide,
   recordByType,
   settlementMode,
   tableMultiple,
@@ -319,6 +321,62 @@ describe("record by leg type", () => {
   })
 })
 
+
+describe("overs and unders by league", () => {
+  // The two power plays of 1 November 2026, as logged: four NFL goblins at
+  // "$10 for $40", and four NBA unders, two of them goblins, at "$3.75 to win
+  // $24.38" — all of them read off the screenshots, results included.
+  const inLeague = (l: TrackedLeg, league: "nba" | "nfl"): TrackedLeg => ({ ...l, league, pickType: "goblin" })
+  const nfl = settle({
+    ...slip("nfl", 10, 40, [
+      inLeague(leg("Darren Waller", "Receptions", 2.5, "UNDER", "WIN"), "nfl"),
+      inLeague(leg("MarShawn Lloyd", "Receptions", 0.5, "OVER", "WIN"), "nfl"),
+      inLeague(leg("Mitchell Evans", "Receptions", 1.5, "UNDER", "LOSS"), "nfl"),
+      inLeague(leg("Tommy Tremble", "Receptions", 1.5, "OVER", "LOSS"), "nfl"),
+    ]),
+    paidOut: 0,
+  })
+  const nba = settle(slip("nba", 3.75, 24.38, [
+    inLeague(leg("Jalen Johnson", "Points", 21.5, "UNDER", "WIN"), "nba"),
+    inLeague(leg("Jeremiah Fears", "Assists", 3.5, "UNDER", "LOSS"), "nba"),
+    inLeague(leg("Zion Williamson", "Assists", 3.5, "UNDER", "WIN"), "nba"),
+    inLeague(leg("Donovan Clingan", "Points", 10.5, "UNDER", "LOSS"), "nba"),
+  ]))
+
+  it("splits every decided leg by league and side, with the bar its entry needed", () => {
+    const r = recordBySide([nfl, nba], DEFAULT_APPS)
+    expect(r.map((x) => `${x.label} ${x.wins}-${x.losses}`)).toEqual(["NBA unders 2-2", "NFL overs 1-1", "NFL unders 1-1"])
+    // 6.5x on four legs is 62.6% a leg; four goblins at 4x is 70.7%.
+    expect(r[0].needed).toBeCloseTo(Math.pow(1 / 6.5, 1 / 4), 3)
+    expect(r[1].needed).toBeCloseTo(Math.pow(1 / 4, 1 / 4), 3)
+    expect(r[1].needed!).toBeGreaterThan(0.7)
+  })
+
+  it("prefers the leg's competition to the section it was played in", () => {
+    const college = settle(slip("cfb", 1, 6, [
+      { ...leg("A", "Receptions", 4.5, "OVER", "WIN"), league: "nfl", competition: "cfb" },
+      { ...leg("B", "Receptions", 4.5, "OVER", "LOSS"), league: "nfl" },
+      leg("C", "Receptions", 4.5, "UNDER", "LOSS"),
+    ]))
+    expect(recordBySide([college], DEFAULT_APPS).map((x) => x.label)).toEqual([
+      "NFL overs",
+      "CFB overs",
+      "Unders, league not recorded",
+    ])
+  })
+
+  it("does not call a handful of legs a difference between the sides", () => {
+    // 2-2 against 0-4 is a 50-point gap, and eight legs.
+    const small = compareSides({ label: "o", wins: 2, losses: 2 }, { label: "u", wins: 0, losses: 4 })!
+    expect(small.gap).toBeCloseTo(0.5)
+    expect(small.significant).toBe(false)
+    // The same rates over a season are a real difference.
+    expect(compareSides({ label: "o", wins: 30, losses: 30 }, { label: "u", wins: 18, losses: 42 })!.significant).toBe(true)
+    // And a small gap over a season is not.
+    expect(compareSides({ label: "o", wins: 31, losses: 29 }, { label: "u", wins: 29, losses: 31 })!.significant).toBe(false)
+    expect(compareSides({ label: "o", wins: 0, losses: 0 }, { label: "u", wins: 1, losses: 0 })).toBeNull()
+  })
+})
 
 describe("typing an entry's legs", () => {
   it("reads player, line, stat, side and result from each line", () => {

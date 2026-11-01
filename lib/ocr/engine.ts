@@ -1,6 +1,7 @@
 "use client"
 
 import { tagBoosts, type Pixels } from "./boost"
+import { tagOutcomes } from "./ring"
 import type { OcrLine } from "./extract"
 
 /**
@@ -152,9 +153,10 @@ export async function readImage(file: File | Blob, onProgress?: (p: OcrProgress)
   const px = await pixelsOf(file)
   if (!px) return { lines: raw.lines, cleanedLines: cleaned.lines, text: raw.text, meanConfidence }
   const scale = prepared instanceof HTMLCanvasElement ? prepared.width / px.width : 1
+  // The ring round each player's picture says whether the leg hit; see ring.ts.
   return {
-    lines: tagBoosts(raw.lines, px),
-    cleanedLines: tagBoosts(cleaned.lines, px, scale),
+    lines: tagOutcomes(tagBoosts(raw.lines, px), px),
+    cleanedLines: tagOutcomes(tagBoosts(cleaned.lines, px, scale), px, scale),
     text: raw.text,
     meanConfidence,
   }

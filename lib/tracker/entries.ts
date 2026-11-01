@@ -1,6 +1,6 @@
 import type { MarketKey } from "@/lib/nba/markets"
 import { extractProps, linesFromText, type PropCandidate } from "@/lib/ocr/extract"
-import type { LeagueId } from "@/lib/leagues"
+import { LOGGED_LEAGUE_IDS, loggedLeagueShort, type LeagueId, type LoggedLeagueId } from "@/lib/leagues"
 import { normalizeName } from "@/lib/quant/correlation"
 import { resolveLine } from "@/lib/quant/distributions"
 import { dfsPayout } from "@/lib/quant/evaluate"
@@ -380,6 +380,107 @@ export function recordByType(slips: TrackedSlip[]): {
   }
 }
 
+export interface SideRecord extends LegRecord {
+  /** "nba|UNDER"; the league half is "unrecorded" for legs logged before leagues were. */
+  key: string
+  league: LoggedLeagueId | null
+  side: "OVER" | "UNDER"
+  /**
+   * The per-leg hit rate these legs' entries needed to break even, averaged
+   * over the legs whose entry had a payout to work it from. A record means
+   * nothing without it: 60% is a winning rate on a standard 2-pick and a
+   * losing one on a four-goblin 4-pick paying 4x, which needs 70.7%.
+   */
+  needed: number | null
+  /** How many of the decided legs that average covers. */
+  neededLegs: number
+}
+
+/**
+ * Settled legs split by league and side: NBA overs, NBA unders, NFL overs...
+ *
+ * This is the record that answers "unders don't work in the NBA", and it is
+ * built from every decided leg, priced or not, because most of what gets
+ * played is logged straight off the app and never priced. The stat-and-side
+ * rows above it split the same legs too finely to say anything about a side
+ * as a whole: "Assists unders 0-1" and "Points unders 1-1" are both too small
+ * to read, where "NBA unders 1-2" at least starts a count.
+ *
+ * The league is the leg's competition where one was recorded — a college leg
+ * in an NFL entry is a college leg — and the section it was played in
+ * otherwise. Legs logged before either was recorded get their own row rather
+ * than a guess.
+ */
+export function recordBySide(slips: TrackedSlip[], apps: BookApp[]): SideRecord[] {
+  const map = new Map<string, SideRecord & { neededSum: number }>()
+  for (const s of slips) {
+    const be = entryBreakEven(s, apps)
+    for (const l of s.legs) {
+      if (l.result !== "WIN" && l.result !== "LOSS") continue
+      const league = l.competition ?? l.league ?? null
+      const key = `${league ?? "unrecorded"}|${l.side}`
+      const sides = l.side === "OVER" ? "overs" : "unders"
+      const r =
+        map.get(key) ??
+        {
+          key,
+          league,
+          side: l.side,
+          label: league ? `${loggedLeagueShort(league)} ${sides}` : `${sides[0].toUpperCase()}${sides.slice(1)}, league not recorded`,
+          wins: 0,
+          losses: 0,
+          needed: null,
+          neededLegs: 0,
+          neededSum: 0,
+        }
+      if (l.result === "WIN") r.wins++
+      else r.losses++
+      if (be != null) {
+        r.neededSum += be
+        r.neededLegs++
+      }
+      map.set(key, r)
+    }
+  }
+  const order = (r: SideRecord) => (r.league ? LOGGED_LEAGUE_IDS.indexOf(r.league) : LOGGED_LEAGUE_IDS.length)
+  return Array.from(map.values())
+    .map(({ neededSum, ...r }) => ({ ...r, needed: r.neededLegs > 0 ? neededSum / r.neededLegs : null }))
+    .sort((a, b) => order(a) - order(b) || (a.side === b.side ? 0 : a.side === "OVER" ? -1 : 1))
+}
+
+export interface SideComparison {
+  /** Hit rate of the overs minus the unders'. Positive: the overs are doing better. */
+  gap: number
+  /** Standard error of that gap, pooled under the hypothesis that the sides hit alike. */
+  stderr: number
+  /** True only when the gap is over two standard errors and both sides have twenty legs. */
+  significant: boolean
+}
+
+/**
+ * Whether one league's overs and unders really are hitting at different rates.
+ *
+ * Two proportions and the standard error of their difference: the simplest
+ * honest test, and the only one a few dozen legs can support. It says nothing
+ * about WHY — a side can trail because of the lines chosen, the goblins on it
+ * or the payouts it was played at — only whether the gap is bigger than the
+ * coin would make on its own. Null until both sides have a leg.
+ */
+export function compareSides(overs: LegRecord, unders: LegRecord): SideComparison | null {
+  const n1 = overs.wins + overs.losses
+  const n2 = unders.wins + unders.losses
+  if (n1 === 0 || n2 === 0) return null
+  const p1 = overs.wins / n1
+  const p2 = unders.wins / n2
+  // Pooled, as the test of "no difference" should be: under that hypothesis
+  // both sides share one rate. Unpooled, a 3-0 against a 0-3 has a variance of
+  // zero on each side and six legs would read as proof.
+  const pooled = (overs.wins + unders.wins) / (n1 + n2)
+  const stderr = Math.sqrt(pooled * (1 - pooled) * (1 / n1 + 1 / n2))
+  const gap = p1 - p2
+  return { gap, stderr, significant: Math.abs(gap) > 2 * stderr && n1 >= 20 && n2 >= 20 }
+}
+
 export interface DraftLeg {
   player: string
   marketKey: MarketKey | null
@@ -452,7 +553,9 @@ export function draftFromCandidate(c: PropCandidate, result: LegResult = "PENDIN
     marketLabel: c.marketLabel,
     line: c.line,
     side: c.side ?? null,
-    result: c.dnp ? "VOID" : result,
+    // A Reboot outranks the ring: the player did not play, whatever colour
+    // the screen draws. A result typed beside the leg outranks it too.
+    result: c.dnp ? "VOID" : result !== "PENDING" ? result : (c.outcome ?? "PENDING"),
     // Read in colour: a face means a goblin or demon, none a standard pick.
     // Not read in colour (typed text): unknown.
     pickType: c.boost === undefined ? undefined : (c.boost ?? "standard"),

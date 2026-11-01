@@ -1,0 +1,333 @@
+{
+ "raw": [
+  {
+   "text": "9:11 z e ls @)",
+   "confidence": 29.381607055664062,
+   "bbox": {
+    "x0": 131,
+    "y0": 79,
+    "x1": 1120,
+    "y1": 118
+   },
+   "outcome": null
+  },
+  {
+   "text": "Dp $10 for $40 *",
+   "confidence": 67.7031021118164,
+   "bbox": {
+    "x0": 116,
+    "y0": 305,
+    "x1": 931,
+    "y1": 428
+   },
+   "outcome": null
+  },
+  {
+   "text": ") 4-Pick Power Play (Loss CO",
+   "confidence": 76.39973449707031,
+   "bbox": {
+    "x0": 23,
+    "y0": 368,
+    "x1": 941,
+    "y1": 463
+   },
+   "outcome": null
+  },
+  {
+   "text": "Entry Pulse Details",
+   "confidence": 96.62001037597656,
+   "bbox": {
+    "x0": 223,
+    "y0": 501,
+    "x1": 996,
+    "y1": 534
+   },
+   "outcome": null
+  },
+  {
+   "text": "NFL CAR19vs GB 27 Final",
+   "confidence": 73.45375061035156,
+   "bbox": {
+    "x0": 174,
+    "y0": 657,
+    "x1": 1046,
+    "y1": 679
+   },
+   "outcome": null
+  },
+  {
+   "text": "(88, Darren Waller Ov 25",
+   "confidence": 60.3533935546875,
+   "bbox": {
+    "x0": 187,
+    "y0": 769,
+    "x1": 1017,
+    "y1": 854
+   },
+   "boost": "goblin",
+   "outcome": "WIN"
+  },
+  {
+   "text": ")2 CAR + TE + #88 Recs",
+   "confidence": 31.909629821777344,
+   "bbox": {
+    "x0": 254,
+    "y0": 824,
+    "x1": 1018,
+    "y1": 858
+   },
+   "outcome": "WIN"
+  },
+  {
+   "text": "(©)",
+   "confidence": 43.0039176940918,
+   "bbox": {
+    "x0": 259,
+    "y0": 847,
+    "x1": 293,
+    "y1": 881
+   },
+   "outcome": "WIN"
+  },
+  {
+   "text": "32 | MarShawn Lloyd @ro5",
+   "confidence": 64.98026275634766,
+   "bbox": {
+    "x0": 203,
+    "y0": 1054,
+    "x1": 1018,
+    "y1": 1155
+   },
+   "boost": "goblin",
+   "outcome": "WIN"
+  },
+  {
+   "text": "GB - RB - #32 Recs",
+   "confidence": 83.70933532714844,
+   "bbox": {
+    "x0": 329,
+    "y0": 1121,
+    "x1": 1018,
+    "y1": 1147
+   },
+   "outcome": "WIN"
+  },
+  {
+   "text": "©",
+   "confidence": 92.61631774902344,
+   "bbox": {
+    "x0": 259,
+    "y0": 1144,
+    "x1": 293,
+    "y1": 1178
+   },
+   "outcome": "WIN"
+  },
+  {
+   "text": "‘g4 Mitchell Evans OW vi5",
+   "confidence": 28.669418334960938,
+   "bbox": {
+    "x0": 187,
+    "y0": 1353,
+    "x1": 1018,
+    "y1": 1416
+   },
+   "boost": "goblin",
+   "outcome": "LOSS"
+  },
+  {
+   "text": "oF CAR - TE - #84 Recs",
+   "confidence": 64.72636413574219,
+   "bbox": {
+    "x0": 258,
+    "y0": 1413,
+    "x1": 1018,
+    "y1": 1480
+   },
+   "outcome": "LOSS"
+  },
+  {
+   "text": "Tommy Tremble OT 15",
+   "confidence": 57.917945861816406,
+   "bbox": {
+    "x0": 328,
+    "y0": 1660,
+    "x1": 1018,
+    "y1": 1702
+   },
+   "boost": "goblin",
+   "outcome": "LOSS"
+  },
+  {
+   "text": "CAR - TE «- #82 Recs",
+   "confidence": 73.67768096923828,
+   "bbox": {
+    "x0": 329,
+    "y0": 1715,
+    "x1": 1018,
+    "y1": 1741
+   },
+   "outcome": "LOSS"
+  },
+  {
+   "text": "o-_",
+   "confidence": 26.652305603027344,
+   "bbox": {
+    "x0": 253,
+    "y0": 1660,
+    "x1": 294,
+    "y1": 1773
+   },
+   "outcome": "LOSS"
+  }
+ ],
+ "cleaned": [
+  {
+   "text": "9:11 a e ool > @",
+   "confidence": 47.28288650512695,
+   "bbox": {
+    "x0": 255,
+    "y0": 156,
+    "x1": 2181,
+    "y1": 229
+   },
+   "outcome": null
+  },
+  {
+   "text": "p> S10 for S40 t",
+   "confidence": 68.27679443359375,
+   "bbox": {
+    "x0": 240,
+    "y0": 613,
+    "x1": 1813,
+    "y1": 797
+   },
+   "outcome": null
+  },
+  {
+   "text": ") 4-Pick Power Play Loss C",
+   "confidence": 77.77313995361328,
+   "bbox": {
+    "x0": 45,
+    "y0": 724,
+    "x1": 1827,
+    "y1": 902
+   },
+   "outcome": null
+  },
+  {
+   "text": "Entry Pulse Details",
+   "confidence": 96.5208969116211,
+   "bbox": {
+    "x0": 435,
+    "y0": 976,
+    "x1": 1940,
+    "y1": 1040
+   },
+   "outcome": null
+  },
+  {
+   "text": "NFL CAR19 vs GB 27 Final",
+   "confidence": 81.63626098632812,
+   "bbox": {
+    "x0": 339,
+    "y0": 1280,
+    "x1": 2038,
+    "y1": 1324
+   },
+   "outcome": null
+  },
+  {
+   "text": "99. Darren Waller @ J 2.5",
+   "confidence": 69.62629699707031,
+   "bbox": {
+    "x0": 393,
+    "y0": 1493,
+    "x1": 1981,
+    "y1": 1596
+   },
+   "boost": "goblin",
+   "outcome": "WIN"
+  },
+  {
+   "text": "5 CAR -TE- #88 Recs",
+   "confidence": 68.27949523925781,
+   "bbox": {
+    "x0": 496,
+    "y0": 1580,
+    "x1": 1983,
+    "y1": 1717
+   },
+   "outcome": "WIN"
+  },
+  {
+   "text": "MarShawn Lloyd @ tT 05",
+   "confidence": 62.688018798828125,
+   "bbox": {
+    "x0": 644,
+    "y0": 2077,
+    "x1": 1983,
+    "y1": 2158
+   },
+   "boost": "goblin",
+   "outcome": "WIN"
+  },
+  {
+   "text": "GB - RB ¢ #32 Recs",
+   "confidence": 69.29476928710938,
+   "bbox": {
+    "x0": 641,
+    "y0": 2185,
+    "x1": 1983,
+    "y1": 2235
+   },
+   "outcome": "WIN"
+  },
+  {
+   "text": "Mitchell Evans @ wv 15",
+   "confidence": 62.182762145996094,
+   "bbox": {
+    "x0": 644,
+    "y0": 2656,
+    "x1": 1983,
+    "y1": 2736
+   },
+   "boost": "goblin",
+   "outcome": "LOSS"
+  },
+  {
+   "text": "CAR +-TE- #84 Recs",
+   "confidence": 64.25875854492188,
+   "bbox": {
+    "x0": 641,
+    "y0": 2763,
+    "x1": 1983,
+    "y1": 2814
+   },
+   "outcome": "LOSS"
+  },
+  {
+   "text": "Tommy Tremble @ 15",
+   "confidence": 80.49378967285156,
+   "bbox": {
+    "x0": 638,
+    "y0": 3234,
+    "x1": 1983,
+    "y1": 3315
+   },
+   "boost": "goblin",
+   "outcome": "LOSS"
+  },
+  {
+   "text": "CAR « TE « #82 Recs",
+   "confidence": 85.5177001953125,
+   "bbox": {
+    "x0": 641,
+    "y0": 3342,
+    "x1": 1983,
+    "y1": 3392
+   },
+   "outcome": "LOSS"
+  }
+ ]
+}

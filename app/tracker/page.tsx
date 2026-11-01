@@ -20,18 +20,21 @@ import {
 import { LogEntry } from "@/components/log-entry"
 import { findApp, findMode } from "@/lib/quant/payouts"
 import {
+  compareSides,
   entryBreakEven,
   nightReviews,
   openExposure,
+  recordBySide,
   recordByType,
   tableMultiple,
   withResults,
   type Exposure,
+  type SideRecord,
 } from "@/lib/tracker/entries"
 import { useStore } from "@/lib/store/provider"
 import type { LegResult, TrackedSlip } from "@/lib/store/schema"
 import { money, multiple, pct, shortDate, signedPct } from "@/lib/format"
-import { isLoggedLeagueId, loggedLeagueLabel } from "@/lib/leagues"
+import { isLoggedLeagueId, loggedLeagueLabel, loggedLeagueShort } from "@/lib/leagues"
 import { MARKETS } from "@/lib/nba/markets"
 import { fitMovement, lineMoves, summariseHistory } from "@/lib/quant/lines"
 import { KICKOFF_VARIANCE_PER_DAY } from "@/lib/quant/valuebets"
@@ -58,6 +61,7 @@ export default function TrackerPage() {
           league: l.league,
           market: l.marketKey,
           marketLabel: l.marketLabel,
+          side: l.side,
         })),
     [slips],
   )
@@ -87,6 +91,17 @@ export default function TrackerPage() {
       }),
     [observations],
   )
+  // The model's own honesty, side by side: does it flatter NBA unders more
+  // than NBA overs? Six cells at most, so one table does not become noise.
+  const bySide = React.useMemo(
+    () =>
+      groupedCalibration(observations, (o) => {
+        const id = o.competition ?? o.league
+        if (!id || !o.side || !isLoggedLeagueId(id)) return null
+        return { key: `${id}|${o.side}`, label: `${loggedLeagueShort(id)} ${o.side === "OVER" ? "overs" : "unders"}` }
+      }),
+    [observations],
+  )
   // Line history: the only estimate of the kickoff widening that is not
   // circular, since a settled leg's probability already had it applied.
   const movement = React.useMemo(() => fitMovement(lineMoves(state.lines)), [state.lines])
@@ -97,6 +112,18 @@ export default function TrackerPage() {
   const exposure = React.useMemo(() => openExposure(slips), [slips])
   const nights = React.useMemo(() => nightReviews(slips).filter((n) => n.exposure.length > 0).slice(0, 3), [slips])
   const record = React.useMemo(() => recordByType(slips), [slips])
+  const sides = React.useMemo(() => recordBySide(slips, state.settings.apps), [slips, state.settings.apps])
+  // One sentence per league that has both: is the gap bigger than luck makes?
+  const sideVerdicts = React.useMemo(() => {
+    const out: { league: string; overs: SideRecord; unders: SideRecord; cmp: NonNullable<ReturnType<typeof compareSides>> }[] = []
+    for (const o of sides) {
+      if (o.side !== "OVER" || !o.league) continue
+      const u = sides.find((r) => r.league === o.league && r.side === "UNDER")
+      const cmp = u ? compareSides(o, u) : null
+      if (u && cmp) out.push({ league: loggedLeagueShort(o.league), overs: o, unders: u, cmp })
+    }
+    return out
+  }, [sides])
   const [logging, setLogging] = React.useState(false)
 
   // What each settled leg had to hit, on average, at the payouts actually played.
@@ -256,6 +283,67 @@ export default function TrackerPage() {
             Did-not-play and pushes are left out. Goblins should hit far more often than standard picks: they pay
             less for it, so compare each against the bar its own payout set, not against each other.
           </p>
+
+          {sides.length > 0 ? (
+            <div className="mt-4 border-t border-border/40 pt-3">
+              <h3 className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Overs and unders</h3>
+              <table className="mt-2 w-full text-xs">
+                <thead>
+                  <tr className="text-left font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                    <th className="pb-1">Side</th>
+                    <th className="pb-1 text-right">Record</th>
+                    <th className="pb-1 text-right">Hit</th>
+                    <th className="pb-1 text-right">Needed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sides.map((r) => {
+                    const n = r.wins + r.losses
+                    const rate = r.wins / n
+                    return (
+                      <tr key={r.key} className="border-t border-border/40">
+                        <td className="py-1.5">{r.label}</td>
+                        <td className="py-1.5 text-right font-mono tabular-nums">
+                          {r.wins}-{r.losses}
+                        </td>
+                        <td
+                          className={cn(
+                            "py-1.5 text-right font-mono tabular-nums",
+                            // Coloured against its own bar only once there are
+                            // enough legs for the colour to mean something.
+                            r.needed == null || n < 20 ? "text-muted-foreground" : rate >= r.needed ? "text-primary" : "text-destructive",
+                          )}
+                        >
+                          {pct(rate, 0)}
+                        </td>
+                        <td className="py-1.5 text-right font-mono tabular-nums text-muted-foreground">
+                          {r.needed != null ? pct(r.needed, 0) : "—"}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+              <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                {sideVerdicts.map(({ league, overs, unders, cmp }) => (
+                  <span key={league} className="block">
+                    <span className="text-foreground">
+                      {league}: overs {pct(overs.wins / (overs.wins + overs.losses), 0)} over {overs.wins + overs.losses},
+                      unders {pct(unders.wins / (unders.wins + unders.losses), 0)} over {unders.wins + unders.losses}.
+                    </span>{" "}
+                    {cmp.significant
+                      ? `A gap of ${Math.round(Math.abs(cmp.gap) * 100)} points is more than twice what luck makes on these samples: the ${cmp.gap > 0 ? "unders" : "overs"} really are trailing. The unders margin under Settings → Odds feed decides how much more an ${league} under has to clear.`
+                      : Math.min(overs.wins + overs.losses, unders.wins + unders.losses) < 20
+                        ? "Too few to tell the sides apart: it needs twenty legs a side before a gap here can count."
+                        : `Within what luck makes on these samples (±${Math.round(2 * cmp.stderr * 100)} points): no real difference yet.`}
+                  </span>
+                ))}
+                Every decided leg counts here, priced or not, with its result read off the screenshot where the ring
+                showed one. &ldquo;Needed&rdquo; is the per-leg rate those legs&apos; own entries had to hit to break even,
+                which is the bar a side has to be judged against: goblin-heavy entries pay less, so they need more.
+              </p>
+            </div>
+          ) : null}
         </section>
       ) : null}
 
@@ -312,6 +400,7 @@ export default function TrackerPage() {
           {[
             { title: "By competition", rows: byCompetition },
             { title: "By market", rows: byMarket },
+            { title: "By side", rows: bySide },
           ].map(({ title, rows }) =>
             rows.length === 0 ? null : (
               <div key={title} className="mt-4 border-t border-border/40 pt-3">
@@ -319,7 +408,7 @@ export default function TrackerPage() {
                 <table className="mt-2 w-full text-xs">
                   <thead>
                     <tr className="text-left font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                      <th className="pb-1">{title === "By market" ? "Market" : "Competition"}</th>
+                      <th className="pb-1">{title === "By market" ? "Market" : title === "By side" ? "Side" : "Competition"}</th>
                       <th className="pb-1 text-right">Legs</th>
                       <th className="pb-1 text-right">Model said</th>
                       <th className="pb-1 text-right">Actual</th>

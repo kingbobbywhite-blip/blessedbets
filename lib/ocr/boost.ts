@@ -36,7 +36,7 @@ export const BOOST_BAND = { from: 0.6, to: 0.78, barFrom: 0.27, barTo: 0.6 }
 const isGreen = (r: number, g: number, b: number) => g > 150 && g - r > 50 && g - b > 80
 const isRed = (r: number, g: number, b: number) => r > 170 && r - g > 90 && r - b > 90
 
-function colourAt(px: Pixels, x: number, y: number): "green" | "red" | null {
+export function colourAt(px: Pixels, x: number, y: number): "green" | "red" | null {
   const i = (y * px.width + x) * 4
   const r = px.data[i]
   const g = px.data[i + 1]

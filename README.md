@@ -162,7 +162,7 @@ from. Three things cause it:
   PowerShell 5 UTF-16 trap above still applies.
 
 ```bash
-npm test         # 644 unit tests over the probability engine, the feeds and screenshot reading
+npm test         # 745 unit tests over the probability engine, the feeds and screenshot reading
 npm run lint
 npm run build
 ```
@@ -377,6 +377,31 @@ every leg hits" payout among your last five logged entries of the same app, mode
 standard picks only, wherever that is below the stored table. A leg has to clear the bar at the
 payout the entry may actually get, and the heading on the entry card says which number the bar
 is using.
+
+**An under in the NBA has to clear a little more.** Unders have not worked as well in the NBA in
+the experience of the person this is built for, and it came up over a 4-pick of four NBA unders.
+Two hit. The two that missed were Jeremiah Fears at 13 assists against an under of 3.5, and
+Donovan Clingan passing 10.5 points with four minutes left in a 21-point game. So Settings →
+Odds feed carries a margin per league that an under has to clear on top of the bar: three points
+in the NBA by default, none elsewhere. With the NBA margin a 56% bar asks 59% of an under and
+still 56% of an over. The margin moves no probability, only which side is a pass. It can stop you
+playing an under. It cannot make one look better than the market says. A row it holds back says
+that is why, and the Today screen names the margin whenever it is in force. Two of four is not
+evidence, and the three points are a prior, not a measurement. The tracker is where it gets tested.
+
+**The tracker splits overs from unders, by league, against the bar they needed.** "NBA unders
+2-2, needed 63%" says something that "Assists unders 1-1" and "Points unders 1-1" cannot. Each
+row prints the per-leg rate its own entries had to hit to break even, because goblin-heavy entries
+pay less and need more. A four-goblin 4-pick at "$10 for $40" is 4x, and every leg had to hit
+70.7%. Where a league has both sides, the screen says whether the gap is bigger than luck makes
+on those samples. The bar for that is twenty legs a side and two standard errors.
+
+**A logged entry now reads which legs hit, off the ring round each player.** Green is a hit and
+red a miss, as soon as the leg is decided. An under already passed is ringed red in the fourth
+quarter of a live game. Before this, every leg of a logged loss came in "Not settled", and unless
+each was set by hand the record by side never filled. The screenshot reader also failed on an
+entry still in play: it reads "$X for $Y" and "$X paid $Y" but not "$3.75 to win $24.38", so that
+entry logged with no stake or payout. It reads all three now.
 
 **The entry's expected value, when no payout table has been confirmed.** An expected value is the
 payout table's number as much as the legs' — it is a sum over the table's tiers — and every table
