@@ -679,6 +679,72 @@ describe("appVerdict: the target row's answer at the app's own line", () => {
   })
 })
 
+import { sideBars } from "@/lib/today/build"
+import { migrate } from "@/lib/store/schema"
+
+describe("a margin on unders", () => {
+  // The NBA's under margin is the user's prior, from entries like the four
+  // NBA unders of 1 November 2026: Fears went for 13 assists against 3.5 and
+  // Clingan cleared 10.5 points with four minutes left. It may only ever turn
+  // a play into a pass, and it may never move a probability.
+  const bars = sideBars(0.562, 0.03)
+
+  it("asks the margin of an under and nothing extra of an over", () => {
+    expect(bars.over).toBeCloseTo(0.562, 9)
+    expect(bars.under).toBeCloseTo(0.592, 9)
+    expect(sideBars(0.562, -0.05).under).toBeCloseTo(0.562, 9)
+    expect(sideBars(0.98, 0.1).under).toBeLessThan(1)
+  })
+
+  it("moves the under threshold out and leaves the over threshold and every chance alone", () => {
+    const dist = distributionFor("PTS", 18)
+    const flat = dfsTargetsFor(18, dist, 0.562, { postedLines: [17.5, 18.5] })
+    const held = dfsTargetsFor(18, dist, bars, { postedLines: [17.5, 18.5] })
+    expect(held.overAt).toBe(flat.overAt)
+    expect(held.ladder).toEqual(flat.ladder)
+    expect(held.fairLine).toBe(flat.fairLine)
+    expect(held.underAt!).toBeGreaterThan(flat.underAt!)
+    expect(held.underProb!).toBeGreaterThanOrEqual(0.592)
+  })
+
+  it("keeps an under between the two bars out of the entry, and an over at the same chance in", () => {
+    const t = (player: string, gameId: string, marketProb: number, marketSide: "OVER" | "UNDER"): DfsTarget =>
+      ({ key: player, player, gameId, marketProb, marketSide, market: "PTS", marketLine: 10.5, marketLabel: "Points" }) as DfsTarget
+    const targets = [t("Clingan", "g1", 0.58, "UNDER"), t("Johnson", "g2", 0.58, "OVER"), t("Zion", "g3", 0.6, "UNDER"), t("Fears", "g4", 0.57, "OVER")]
+    expect(buildPickemEntry(targets, 3, 0.562)!.map((l) => l.target.player)).toEqual(["Zion", "Clingan", "Johnson"])
+    // Clingan's 58% under is a pass at 59.2%; the over beneath it is not.
+    expect(buildPickemEntry(targets, 3, bars)!.map((l) => l.target.player)).toEqual(["Zion", "Johnson", "Fears"])
+    expect(buildPickemEntry(targets, 4, bars)).toBeNull()
+  })
+
+  it("says the margin is why a row passes, rather than claiming neither side clears", () => {
+    const ud = (over: number): Pick<DfsTarget, "appLines"> => ({
+      appLines: [
+        {
+          app: "prizepicks", line: 10.5, pickType: "standard", over, under: 1 - over, push: 0,
+          overMultiplier: null, underMultiplier: null, overOffered: true, underOffered: true,
+          fetchedAt: null, ageMinutes: null, isStale: false,
+        },
+      ],
+    })
+    expect(appVerdict(ud(0.42), "prizepicks", 0.562)!.side).toBe("UNDER")
+    const held = appVerdict(ud(0.42), "prizepicks", bars)!
+    expect(held.side).toBeNull()
+    expect(held.reason).toMatch(/clears the bar but not your margin for unders \(needs 59.2%\)/)
+    expect(appVerdict(ud(0.58), "prizepicks", bars)!.side).toBe("OVER")
+    expect(appVerdict(ud(0.5), "prizepicks", bars)!.reason).toBe("neither side clears")
+  })
+
+  it("starts the NBA at three points, keeps a stored choice, and drops nonsense", () => {
+    const fresh = migrate({})
+    expect(fresh.settings.daily.underMargin).toEqual({ nba: 0.03 })
+    const kept = migrate({ settings: { daily: { underMargin: { nba: 0, nfl: 0.02 } } } } as never)
+    expect(kept.settings.daily.underMargin).toEqual({ nba: 0, nfl: 0.02 })
+    const junk = migrate({ settings: { daily: { underMargin: { nba: "lots", nhl: 0.05, nfl: 9 } } } } as never)
+    expect(junk.settings.daily.underMargin).toEqual({ nba: 0.03, nfl: 0.2 })
+  })
+})
+
 describe("exchange commission", () => {
   it("judges an exchange price on what comes back after commission", () => {
     expect(sideEdge(0.51, 100).edge).toBeCloseTo(0.02, 9)

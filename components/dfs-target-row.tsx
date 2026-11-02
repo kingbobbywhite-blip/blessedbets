@@ -7,7 +7,7 @@ import { SideBadge } from "@/components/side-badge"
 import { CompetitionBadge } from "@/components/competition-badge"
 import { pct, possessive } from "@/lib/format"
 import { DEFAULT_APPS, findApp } from "@/lib/quant/payouts"
-import { appVerdict, dfsVerdict, probAt, pushAt, type AppLine, type DfsTarget } from "@/lib/today/build"
+import { appVerdict, barFor, dfsVerdict, probAt, pushAt, type AppLine, type DfsTarget, type SideBars } from "@/lib/today/build"
 
 /** "PrizePicks 24.5 over 58%", or the flavour and multiplier when the pick is not standard. */
 function describeAppLine(l: AppLine): string {
@@ -34,8 +34,10 @@ function describeAppLine(l: AppLine): string {
  * pick is named, so a discounted Underdog side reads as a pass with its reason.
  * Typing a different number still overrides it.
  */
-export function DfsTargetRow({ t, bar, app }: { t: DfsTarget; bar: number; app?: string | null }) {
-  const atApp = app ? appVerdict(t, app, bar) : null
+export function DfsTargetRow({ t, bar, app }: { t: DfsTarget; bar: number | SideBars; app?: string | null }) {
+  // One bar per side: an under may carry a margin the over does not.
+  const bars: SideBars = typeof bar === "number" ? { over: bar, under: bar } : bar
+  const atApp = app ? appVerdict(t, app, bars) : null
   const appLabel = (app && findApp(DEFAULT_APPS, app)?.name) || app || "the app"
   // The chance the row leads with is the chance at the line you can play: the
   // app's own when the pull carried it, the books' when it did not. Both are
@@ -127,7 +129,7 @@ export function DfsTargetRow({ t, bar, app }: { t: DfsTarget; bar: number; app?:
             Below the bar, neither side is a pick'em play, so no side is shown:
             a 52% "under" here beside a sportsbook's priced "over" read as two
             picks. */}
-        {chanceProb >= bar && chanceSide ? (
+        {chanceSide && chanceProb >= barFor(bars, chanceSide) ? (
           <div className="flex items-center gap-1.5">
             <SideBadge side={chanceSide} />
             <span className="font-mono text-xs tabular-nums">{pct(chanceProb, 0)}</span>

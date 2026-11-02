@@ -317,6 +317,40 @@ progress bar crosses skipped. Each logged leg records its pick type, and the tra
 goblins, demons and standard picks in separate records, because each is priced to hit at a
 different rate.
 
+### Which legs hit, off the ring
+
+Each player on an entry screen sits in a ring that turns green when the leg hits and red when
+it misses, with a tick or a cross added once the game is over. The number at the end of the
+progress bar sits in a coloured bubble that text recognition reads as junk, so the result is
+read the way the goblin is: by colour, in the band of the row where the ring sits (11-26% of the
+width), skipping pixel rows a progress bar crosses, since a hit's bar is the same lime and
+starts in the same band. The leg's name row and stat row are each read on their own, and the two
+reads of the screenshot are combined. Rows or reads that disagree claim nothing, so the leg is left
+for you to set.
+
+The colour is set when the leg is decided, not when the game ends. A real screen ringed an under
+red in the fourth quarter of a live game, because it had already been passed and could not come
+back, and that is the right reading. A leg still open is ringed in neither colour and stays
+unsettled. A Reboot outranks the ring, and so does a result typed beside the leg.
+
+An entry still in play heads its screen "$3.75 to win $24.38" rather than "$X for $Y". It is
+the same number, the whole return if every leg hits. Read as profit, that 4-pick would be
+7.5x. Read as the return it is 6.5x, which matches the four-goblin 4-pick from the same night
+at "$10 for $40" (4x): each goblin cuts the 10x table by about a fifth.
+
+### Overs and unders
+
+The tracker splits every decided leg, priced or not, by league and side: NBA overs, NBA unders,
+NFL overs and so on. Each row prints its hit rate beside the per-leg rate its own entries needed
+to break even, averaged over the legs whose entry had a payout to work it from. That second
+number is what makes the first readable. Sixty percent wins on a standard 2-pick and loses on a
+four-goblin 4-pick at 4x, which needs 70.7%.
+
+Where a league has both sides, the two rates are compared with a pooled two-proportion test. A
+gap counts only when it is over two standard errors and each side has at least twenty legs.
+Below that the screen says how wide a gap luck alone makes on those samples. The same split runs
+through calibration as a "By side" table, for the legs the app priced.
+
 ### Overlap across entries
 
 The same leg in two entries is the same bet twice, and an over in one entry with an under at
@@ -384,6 +418,15 @@ still clears the per-leg hit rate your entry size requires.
 That turns "tell me what to play on PrizePicks" into something answerable: here is the
 player, here is the number, take the over only at or below it. If neither side clears, the
 prop is a pass, which is the correct answer more often than people expect.
+
+**An under can be asked for more.** Settings carries a margin per league that an under has to
+clear on top of the bar. It starts at three points in the NBA and at nothing elsewhere, so with
+the NBA margin a 56% bar asks 59% of an under and still 56% of an over. The NBA's three points
+are the user's own prior, that NBA unders have not hit as priced. They are not a measured number.
+The margin is safe to carry for one reason: its direction. It moves no probability, so every
+chance on screen is still the market's. It only moves the under threshold outward, turns some
+under plays into passes and keeps them out of the entry, and a row it holds back says so instead
+of "neither side clears". The overs-and-unders record is where it gets tested.
 
 ### The apps' own lines
 

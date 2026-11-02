@@ -295,6 +295,21 @@ separate tables rather than a grid, and the implied multiplier appears only at 2
 so, a new competition will show nothing useful for a long time, and CFB legs mostly reach the
 tracker through the screenshot path, which is the path where the competition is hardest to resolve.
 
+**The NBA under margin is a prior, not a finding.** Its three points come from experience of
+NBA unders, raised over an entry of four NBA unders that went two for four. Nothing here can show
+from that why unders would trail their prices. The prices come from sportsbooks, which price both
+sides, and the usual worry runs the other way: the public backs overs, so books shade overs. A
+side that trails in your record could be trailing because of the lines chosen, the goblins on it
+or the payouts it was played at, not the side itself. The margin cannot make that worse, because
+it only removes unders. It can cost real plays, though, so it is set per league and shown on
+the Today screen whenever it is in force. Set it to zero if your record says it is not earning
+its keep.
+
+**A result read off the ring is a colour, not a number.** The actual stat at the end of each
+progress bar is not read, so a leg's margin of victory or defeat is not recorded, and a ring
+the screen draws in some colour this has not seen reads as unsettled. The ring is measured on
+PrizePicks screens only. Another app's entry screen will read every leg as open.
+
 **The implied dispersion multiplier is a normal approximation.** It inverts a hit-rate gap into a
 variance multiplier through the normal quantile, which is not how the count distributions the app
 actually uses behave, and a yardage leg sitting on its coefficient-of-variation floor does not

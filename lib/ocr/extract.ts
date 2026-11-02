@@ -1,6 +1,7 @@
 import { MARKETS, normalizeMarket, type MarketKey } from "@/lib/nba/markets"
 import type { LoggedLeagueId } from "@/lib/leagues"
 import type { Boost } from "./boost"
+import type { Outcome } from "./ring"
 
 /**
  * Turn OCR text from a DFS board screenshot into candidate props.
@@ -35,6 +36,8 @@ export interface OcrLine {
   bbox?: OcrBox
   /** A goblin or demon face beside this line's value, found by colour (see boost.ts). */
   boost?: Boost | null
+  /** The colour of the player's ring on this row of an entry screen: hit, missed, or neither (see ring.ts). */
+  outcome?: Outcome | null
 }
 
 export type Side = "OVER" | "UNDER"
@@ -60,6 +63,12 @@ export interface PropCandidate {
   dnp?: boolean
   /** A goblin or demon on the entry screen. Absent where the screenshot was not read in colour. */
   boost?: Boost | null
+  /**
+   * Whether the leg has hit or missed, from the colour of the player's ring on
+   * an entry screen. Null where the ring was looked at and is neither, which
+   * is a leg still open; absent where the screenshot was not read in colour.
+   */
+  outcome?: Outcome | null
 }
 
 export interface ExtractResult {
@@ -912,6 +921,7 @@ export function extractProps(lines: OcrLine[], hint?: { league?: LoggedLeagueId 
       issues,
       side: item.side ?? null,
       boost: lines[item.index]?.boost,
+      outcome: outcomeOf([lines[item.index]?.outcome]),
     })
   }
 
@@ -1055,6 +1065,7 @@ export function extractProps(lines: OcrLine[], hint?: { league?: LoggedLeagueId 
       side,
       dnp,
       boost: boostOf(sourceLines.map((i) => lines[i]?.boost)),
+      outcome: outcomeOf(sourceLines.map((i) => lines[i]?.outcome)),
     })
   }
 
@@ -1079,6 +1090,19 @@ export function extractProps(lines: OcrLine[], hint?: { league?: LoggedLeagueId 
 function boostOf(tags: (Boost | null | undefined)[]): Boost | null | undefined {
   const checked = tags.filter((t) => t !== undefined)
   return checked.find((t) => t) ?? (checked.length > 0 ? null : undefined)
+}
+
+/**
+ * One outcome from a candidate's lines. The name row and the stat row both
+ * cross the ring, so they normally agree; when they do not, nothing is
+ * claimed, because a wrong result is worse than an empty one the person fills
+ * in. Undefined when no line was read in colour.
+ */
+function outcomeOf(tags: (Outcome | null | undefined)[]): Outcome | null | undefined {
+  const checked = tags.filter((t) => t !== undefined)
+  if (checked.length === 0) return undefined
+  const seen = new Set(checked.filter((t): t is Outcome => t != null))
+  return seen.size === 1 ? [...seen][0] : null
 }
 
 /** Why a leg has no modelled stat: one the app does not model, or one it could not read. */
@@ -1132,8 +1156,9 @@ export interface EntryHeader {
 
 /**
  * The stake, payout and entry type from the top of an entry screen:
- * "$2 for $12" and "3-Pick Power Play Loss". The cleaned read turns "$" into
- * "S", so either is accepted.
+ * "$2 for $12" and "3-Pick Power Play Loss", or "$3.75 to win $24.38" on an
+ * entry still in play. The cleaned read turns "$" into "S", so either is
+ * accepted.
  *
  * A settled entry that paid anything says so instead: "$10 paid $5". That is
  * the result, and the only trustworthy one: a 6-pick flex of goblins that hit
@@ -1169,7 +1194,13 @@ interface RawHeader {
 function headerFrom(lines: OcrLine[]): RawHeader {
   const h: RawHeader = { stake: null, payout: null, paid: null, lost: false, picks: null, mode: null }
   for (const l of lines) {
-    const money = l.text.match(/[$S]\s?(\d{1,5}(?:\.\d{1,2})?)\s*(for|paid)\s*[$S]\s?(\d{1,6}(?:\.\d{1,2})?)/i)
+    // An entry still in play says "$3.75 to win $24.38" rather than "$X for
+    // $Y". It is the same number: the whole return if every leg hits, not the
+    // profit. Read as profit, that 4-pick of two goblins would be 7.5x; read
+    // as the return it is 6.5x, which is where the same night's four-goblin
+    // 4-pick at "$10 for $40" (4x) puts it — each goblin cutting the 10x
+    // table by about a fifth.
+    const money = l.text.match(/[$S]\s?(\d{1,5}(?:\.\d{1,2})?)\s*(for|paid|to\s*win)\s*[$S]\s?(\d{1,6}(?:\.\d{1,2})?)/i)
     if (money && h.stake == null) {
       h.stake = Number.parseFloat(money[1])
       const amount = Number.parseFloat(money[3])
@@ -1237,6 +1268,10 @@ export function mergeReads(primary: PropCandidate[], secondary: PropCandidate[])
     if (existing.side == null) existing.side = c.side ?? null
     else if (c.side && c.side !== existing.side) existing.side = null
     if (existing.boost === undefined || (existing.boost === null && c.boost)) existing.boost = c.boost
+    // The same rule across the two reads: a colour one read saw and the other
+    // missed is kept; two reads that disagree claim nothing.
+    if (existing.outcome === undefined || (existing.outcome === null && c.outcome)) existing.outcome = c.outcome
+    else if (existing.outcome && c.outcome && existing.outcome !== c.outcome) existing.outcome = null
     if (c.dnp && !existing.dnp) {
       existing.dnp = true
       existing.issues.push("Marked Reboot on the screenshot: the player did not play.")

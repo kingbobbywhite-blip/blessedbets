@@ -158,6 +158,16 @@ export interface DailySettings {
    */
   pickemMaxProb: number
   /**
+   * How much more an under has to clear in pick'em, on top of the bar, per
+   * league: 0.03 means a 56% bar asks 59% of an under. It only ever turns a
+   * play into a pass and moves no probability, so it cannot invent an edge.
+   *
+   * The NBA's default is the user's own prior — that NBA unders have not
+   * worked as well as they were priced — not a measured number. The tracker's
+   * overs-and-unders record is where it gets tested. See SideBars.
+   */
+  underMargin: Partial<Record<LeagueId, number>>
+  /**
    * Feed market keys to request. Fewer markets means fewer credits.
    *
    * Null means "use whatever this league posts", which is almost always the
@@ -166,6 +176,27 @@ export interface DailySettings {
    * Entries from the wrong sport for a league are ignored.
    */
   markets: string[] | null
+}
+
+/**
+ * The NBA's default margin on unders: three points. A prior, stated by the
+ * person this app is for — NBA unders have not hit for them as priced — and
+ * small enough that an under the market really likes still gets through.
+ */
+export const NBA_UNDER_MARGIN = 0.03
+
+/**
+ * A stored margin map, kept to leagues that exist and numbers a slider can
+ * show. A league absent from what was stored keeps its default, so an install
+ * from before this existed gets the NBA's.
+ */
+function cleanMargins(stored: unknown): Partial<Record<LeagueId, number>> {
+  const out: Partial<Record<LeagueId, number>> = { ...DEFAULT_DAILY.underMargin }
+  if (!stored || typeof stored !== "object") return out
+  for (const [k, v] of Object.entries(stored as Record<string, unknown>)) {
+    if (isLeagueId(k) && typeof v === "number" && Number.isFinite(v)) out[k] = Math.min(0.2, Math.max(0, v))
+  }
+  return out
 }
 
 export const DEFAULT_DAILY: DailySettings = {
@@ -177,6 +208,7 @@ export const DEFAULT_DAILY: DailySettings = {
   markets: null,
   companions: false,
   pickemMaxProb: PICKEM_MAX_PROB,
+  underMargin: { nba: NBA_UNDER_MARGIN },
 }
 
 export interface AppSettings {
@@ -478,7 +510,12 @@ export function migrate(raw: unknown): AppState {
     version: STATE_VERSION,
     settings: {
       bankroll: { ...DEFAULT_BANKROLL, ...(s.bankroll ?? {}) },
-      daily: { ...DEFAULT_DAILY, ...(s.daily ?? {}), league: isLeagueId(s.daily?.league) ? s.daily.league : DEFAULT_LEAGUE },
+      daily: {
+        ...DEFAULT_DAILY,
+        ...(s.daily ?? {}),
+        league: isLeagueId(s.daily?.league) ? s.daily.league : DEFAULT_LEAGUE,
+        underMargin: cleanMargins(s.daily?.underMargin),
+      },
       oddsFeed: migrateOddsFeed(s.oddsFeed),
       projection: {
         ...DEFAULT_PROJECTION_SETTINGS,

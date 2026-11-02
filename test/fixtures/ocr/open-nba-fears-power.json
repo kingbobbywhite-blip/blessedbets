@@ -1,0 +1,462 @@
+{
+ "raw": [
+  {
+   "text": "$3.75 to win $24.38",
+   "confidence": 96.34010314941406,
+   "bbox": {
+    "x0": 242,
+    "y0": 315,
+    "x1": 668,
+    "y1": 360
+   },
+   "boost": null,
+   "outcome": null
+  },
+  {
+   "text": "4-Pick Power Play",
+   "confidence": 94.69857788085938,
+   "bbox": {
+    "x0": 241,
+    "y0": 392,
+    "x1": 626,
+    "y1": 436
+   },
+   "outcome": null
+  },
+  {
+   "text": "Entry Pulse",
+   "confidence": 96.60165405273438,
+   "bbox": {
+    "x0": 223,
+    "y0": 501,
+    "x1": 646,
+    "y1": 534
+   },
+   "outcome": null
+  },
+  {
+   "text": "NBA CLE 111 vs ATL 114",
+   "confidence": 9.910423278808594,
+   "bbox": {
+    "x0": 174,
+    "y0": 657,
+    "x1": 512,
+    "y1": 679
+   },
+   "boost": null,
+   "outcome": null
+  },
+  {
+   "text": "Jalen Johnson",
+   "confidence": 96.52645874023438,
+   "bbox": {
+    "x0": 327,
+    "y0": 771,
+    "x1": 556,
+    "y1": 796
+   },
+   "outcome": "WIN"
+  },
+  {
+   "text": "ATL+F + #1",
+   "confidence": 83.58134460449219,
+   "bbox": {
+    "x0": 328,
+    "y0": 825,
+    "x1": 520,
+    "y1": 850
+   },
+   "boost": null,
+   "outcome": "WIN"
+  },
+  {
+   "text": "(2)",
+   "confidence": 11.601676940917969,
+   "bbox": {
+    "x0": 259,
+    "y0": 847,
+    "x1": 293,
+    "y1": 881
+   },
+   "outcome": "WIN"
+  },
+  {
+   "text": "=",
+   "confidence": 81.51286315917969,
+   "bbox": {
+    "x0": 974,
+    "y0": 80,
+    "x1": 1021,
+    "y1": 95
+   },
+   "outcome": null
+  },
+  {
+   "text": "wls> @)",
+   "confidence": 17.1856689453125,
+   "bbox": {
+    "x0": 903,
+    "y0": 80,
+    "x1": 1116,
+    "y1": 115
+   },
+   "outcome": null
+  },
+  {
+   "text": "Final",
+   "confidence": 95.98099517822266,
+   "bbox": {
+    "x0": 987,
+    "y0": 658,
+    "x1": 1046,
+    "y1": 679
+   },
+   "outcome": null
+  },
+  {
+   "text": "V 21.5",
+   "confidence": 28.071983337402344,
+   "bbox": {
+    "x0": 904,
+    "y0": 776,
+    "x1": 1017,
+    "y1": 807
+   },
+   "boost": null,
+   "outcome": "WIN"
+  },
+  {
+   "text": "Points",
+   "confidence": 96.91934967041016,
+   "bbox": {
+    "x0": 938,
+    "y0": 826,
+    "x1": 1018,
+    "y1": 847
+   },
+   "outcome": "WIN"
+  },
+  {
+   "text": "NBA = SAC 120 vs NOP 132",
+   "confidence": 78.8988265991211,
+   "bbox": {
+    "x0": 174,
+    "y0": 1074,
+    "x1": 548,
+    "y1": 1096
+   },
+   "boost": null,
+   "outcome": null
+  },
+  {
+   "text": "Jeremiah Fears",
+   "confidence": 96.47660064697266,
+   "bbox": {
+    "x0": 327,
+    "y0": 1188,
+    "x1": 574,
+    "y1": 1213
+   },
+   "outcome": "LOSS"
+  },
+  {
+   "text": "NOP -G-#0",
+   "confidence": 15.947525024414062,
+   "bbox": {
+    "x0": 331,
+    "y0": 1241,
+    "x1": 555,
+    "y1": 1267
+   },
+   "boost": null,
+   "outcome": "LOSS"
+  },
+  {
+   "text": "Zion Williamson",
+   "confidence": 96.38848876953125,
+   "bbox": {
+    "x0": 329,
+    "y0": 1485,
+    "x1": 587,
+    "y1": 1510
+   },
+   "outcome": "WIN"
+  },
+  {
+   "text": "NOP -F- #1",
+   "confidence": 60.33291244506836,
+   "bbox": {
+    "x0": 331,
+    "y0": 1538,
+    "x1": 536,
+    "y1": 1564
+   },
+   "boost": null,
+   "outcome": "WIN"
+  },
+  {
+   "text": "NBA MEM113 vs POR 92",
+   "confidence": 85.11972045898438,
+   "bbox": {
+    "x0": 174,
+    "y0": 1788,
+    "x1": 539,
+    "y1": 1810
+   },
+   "boost": "demon",
+   "outcome": null
+  },
+  {
+   "text": "Donovan Clingan",
+   "confidence": 92.81600952148438,
+   "bbox": {
+    "x0": 330,
+    "y0": 1901,
+    "x1": 605,
+    "y1": 1935
+   },
+   "outcome": "LOSS"
+  },
+  {
+   "text": "POR + C+ #23",
+   "confidence": 73.00686645507812,
+   "bbox": {
+    "x0": 331,
+    "y0": 1955,
+    "x1": 565,
+    "y1": 1981
+   },
+   "boost": null,
+   "outcome": "LOSS"
+  },
+  {
+   "text": "Final",
+   "confidence": 96.19922637939453,
+   "bbox": {
+    "x0": 987,
+    "y0": 1075,
+    "x1": 1046,
+    "y1": 1096
+   },
+   "outcome": null
+  },
+  {
+   "text": "@ Q44:32",
+   "confidence": 81.33839416503906,
+   "bbox": {
+    "x0": 906,
+    "y0": 1787,
+    "x1": 1048,
+    "y1": 1814
+   },
+   "boost": "demon",
+   "outcome": null
+  },
+  {
+   "text": "J 10.5",
+   "confidence": 61.08091354370117,
+   "bbox": {
+    "x0": 900,
+    "y0": 1907,
+    "x1": 1018,
+    "y1": 1938
+   },
+   "boost": null,
+   "outcome": "LOSS"
+  },
+  {
+   "text": "Points",
+   "confidence": 96.90022277832031,
+   "bbox": {
+    "x0": 938,
+    "y0": 1957,
+    "x1": 1018,
+    "y1": 1978
+   },
+   "outcome": "LOSS"
+  }
+ ],
+ "cleaned": [
+  {
+   "text": "9°11 ax bd oatl > es",
+   "confidence": 55.506534576416016,
+   "bbox": {
+    "x0": 265,
+    "y0": 149,
+    "x1": 2173,
+    "y1": 241
+   },
+   "outcome": null
+  },
+  {
+   "text": "Dp $3.75 to win $24.38 *",
+   "confidence": 65.81773376464844,
+   "bbox": {
+    "x0": 239,
+    "y0": 613,
+    "x1": 1813,
+    "y1": 797
+   },
+   "outcome": null
+  },
+  {
+   "text": "4-Pick Power Play CO",
+   "confidence": 70.55787658691406,
+   "bbox": {
+    "x0": 470,
+    "y0": 725,
+    "x1": 1832,
+    "y1": 850
+   },
+   "outcome": null
+  },
+  {
+   "text": "Entry Pulse Details",
+   "confidence": 96.5479736328125,
+   "bbox": {
+    "x0": 435,
+    "y0": 975,
+    "x1": 1939,
+    "y1": 1040
+   },
+   "outcome": null
+  },
+  {
+   "text": "NBA CLE 111 vs ATL 114 Final",
+   "confidence": 25.143722534179688,
+   "bbox": {
+    "x0": 339,
+    "y0": 1280,
+    "x1": 2038,
+    "y1": 1323
+   },
+   "outcome": null
+  },
+  {
+   "text": "Jalen Johnson NV 21.5",
+   "confidence": 79.03855895996094,
+   "bbox": {
+    "x0": 637,
+    "y0": 1501,
+    "x1": 1981,
+    "y1": 1573
+   },
+   "boost": null,
+   "outcome": "WIN"
+  },
+  {
+   "text": "ATLeF e #1 Points",
+   "confidence": 76.94713592529297,
+   "bbox": {
+    "x0": 639,
+    "y0": 1607,
+    "x1": 1983,
+    "y1": 1656
+   },
+   "outcome": "WIN"
+  },
+  {
+   "text": "Y",
+   "confidence": 64.45075988769531,
+   "bbox": {
+    "x0": 504,
+    "y0": 1650,
+    "x1": 571,
+    "y1": 1717
+   },
+   "outcome": "WIN"
+  },
+  {
+   "text": "NBA SAC 120 vs NOP 132 Final",
+   "confidence": 78.1827392578125,
+   "bbox": {
+    "x0": 339,
+    "y0": 2092,
+    "x1": 2038,
+    "y1": 2136
+   },
+   "outcome": null
+  },
+  {
+   "text": "Jeremiah Fears @ J 35",
+   "confidence": 79.46749877929688,
+   "bbox": {
+    "x0": 637,
+    "y0": 2311,
+    "x1": 1983,
+    "y1": 2391
+   },
+   "boost": "goblin",
+   "outcome": "LOSS"
+  },
+  {
+   "text": "NOP -G- #0 Assists",
+   "confidence": 79.73544311523438,
+   "bbox": {
+    "x0": 644,
+    "y0": 2418,
+    "x1": 1983,
+    "y1": 2469
+   },
+   "outcome": "LOSS"
+  },
+  {
+   "text": "Zion Williamson @ vv 35",
+   "confidence": 72.64671325683594,
+   "bbox": {
+    "x0": 640,
+    "y0": 2889,
+    "x1": 1983,
+    "y1": 2970
+   },
+   "boost": "goblin",
+   "outcome": "WIN"
+  },
+  {
+   "text": "NOP «- F « #1 Assists",
+   "confidence": 70.4432373046875,
+   "bbox": {
+    "x0": 644,
+    "y0": 2997,
+    "x1": 1983,
+    "y1": 3047
+   },
+   "outcome": "WIN"
+  },
+  {
+   "text": "NBA MEM113 vs POR 92 @ Q4 4:32",
+   "confidence": 88.97752380371094,
+   "bbox": {
+    "x0": 339,
+    "y0": 3482,
+    "x1": 2041,
+    "y1": 3535
+   },
+   "boost": "demon",
+   "outcome": null
+  },
+  {
+   "text": "Donovan Clingan JV 10.5",
+   "confidence": 78.61033630371094,
+   "bbox": {
+    "x0": 644,
+    "y0": 3704,
+    "x1": 1983,
+    "y1": 3776
+   },
+   "boost": null,
+   "outcome": "LOSS"
+  },
+  {
+   "text": "POR -C + #23 Points",
+   "confidence": 69.48748016357422,
+   "bbox": {
+    "x0": 644,
+    "y0": 3809,
+    "x1": 1983,
+    "y1": 3860
+   },
+   "outcome": "LOSS"
+  }
+ ]
+}

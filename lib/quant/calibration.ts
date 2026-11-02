@@ -31,6 +31,8 @@ export interface Observation {
   league?: LoggedLeagueId
   market?: MarketKey | null
   marketLabel?: string
+  /** Over or under, so a side that the model flatters shows up as its own row. */
+  side?: "OVER" | "UNDER"
 }
 
 export interface CalibrationBucket {

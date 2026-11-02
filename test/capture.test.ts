@@ -20,6 +20,11 @@ import nflJeudy from "./fixtures/ocr/settled-nfl-jeudy-power.json"
 import nflRodgers from "./fixtures/ocr/settled-nfl-rodgers-power.json"
 import wnbaGray from "./fixtures/ocr/settled-wnba-gray-power.json"
 import wnbaLoydPaid from "./fixtures/ocr/settled-wnba-loyd-paid.json"
+import nflWaller from "./fixtures/ocr/settled-nfl-waller-goblins.json"
+import nbaFears from "./fixtures/ocr/open-nba-fears-power.json"
+import { draftFromCandidate } from "@/lib/tracker/entries"
+import { outcomeAt, tagOutcomes } from "@/lib/ocr/ring"
+import type { Pixels } from "@/lib/ocr/boost"
 
 /**
  * Capture-a-slate regression tests.
@@ -361,6 +366,135 @@ describe("a second night, with goblins and demons", () => {
 
   it("leaves the pick type unknown on a read with no colour", () => {
     expect(both(settledAddison as Read).every((c) => c.boost === undefined)).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// A third night: two 4-pick power plays, read by the engine with the ring
+// colours tagged as well as the faces. New here:
+//
+//   - An entry still in play says "$3.75 to win $24.38", not "$X for $Y", and
+//     the header reader returned nothing for it: no stake, no payout.
+//   - Each player's ring is green once the leg hits and red once it misses —
+//     including an under crossed in the fourth quarter of a game still live.
+//     Before this, every leg of a logged loss came in "Not settled".
+// ---------------------------------------------------------------------------
+
+const settled = (r: Read) =>
+  both(r)
+    .map((c) => `${c.player} | ${c.line} | ${c.marketKey} | ${c.side ?? "?"} | ${c.boost ?? "standard"} | ${c.outcome ?? "open"}`)
+    .sort()
+
+describe("a third night, with each leg's result read off its ring", () => {
+  it("reads four NFL goblins, three of them on one team's tight ends, and which two missed", () => {
+    expect(settled(nflWaller as Read)).toEqual([
+      "Darren Waller | 2.5 | REC | UNDER | goblin | WIN",
+      "MarShawn Lloyd | 0.5 | REC | OVER | goblin | WIN",
+      "Mitchell Evans | 1.5 | REC | UNDER | goblin | LOSS",
+      "Tommy Tremble | 1.5 | REC | OVER | goblin | LOSS",
+    ])
+    // Four goblins took a 10x 4-pick to 4x: each leg needed 70.7% to break even.
+    expect(readEntryHeader((nflWaller as Read).raw, (nflWaller as Read).cleaned)).toEqual({
+      stake: 10, payout: 40, paid: 0, picks: 4, mode: "power",
+    })
+  })
+
+  it("reads an NBA entry still in play: four unders, two goblins, an under crossed in the fourth", () => {
+    expect(settled(nbaFears as Read)).toEqual([
+      "Donovan Clingan | 10.5 | PTS | UNDER | standard | LOSS",
+      "Jalen Johnson | 21.5 | PTS | UNDER | standard | WIN",
+      "Jeremiah Fears | 3.5 | AST | UNDER | goblin | LOSS",
+      "Zion Williamson | 3.5 | AST | UNDER | goblin | WIN",
+    ])
+  })
+
+  it('reads "$3.75 to win $24.38" as the all-hit return, with no result yet', () => {
+    expect(readEntryHeader((nbaFears as Read).raw, (nbaFears as Read).cleaned)).toEqual({
+      stake: 3.75, payout: 24.38, paid: null, picks: 4, mode: "power",
+    })
+    expect(readEntryHeader(linesFromText("S5 to win S50\n4-Pick Power Play"))).toEqual({
+      stake: 5, payout: 50, paid: null, picks: 4, mode: "power",
+    })
+  })
+
+  it("never tags a header row with a result", () => {
+    for (const r of [nflWaller, nbaFears] as Read[]) {
+      for (const l of [...r.raw, ...r.cleaned]) {
+        if (/Power Play|\$|Final|Q4|Entry/.test(l.text)) expect(l.outcome ?? null).toBeNull()
+      }
+    }
+  })
+
+  it("logs the ring's result, and lets a Reboot outrank it", () => {
+    const [waller] = both(nflWaller as Read).filter((c) => c.player === "Darren Waller")
+    expect(draftFromCandidate(waller).result).toBe("WIN")
+    expect(draftFromCandidate({ ...waller, outcome: "LOSS" }).result).toBe("LOSS")
+    expect(draftFromCandidate({ ...waller, outcome: null }).result).toBe("PENDING")
+    expect(draftFromCandidate({ ...waller, outcome: "WIN", dnp: true }).result).toBe("VOID")
+  })
+
+  it("claims nothing when the two reads see different colours", () => {
+    const c = (outcome: "WIN" | "LOSS"): PropCandidate => ({
+      player: "Jalen Johnson", marketKey: "PTS", marketLabel: "Points", rawMarket: "Points", line: 21.5,
+      confidence: 0.9, sourceLines: [0], issues: [], outcome,
+    })
+    expect(mergeReads([c("WIN")], [c("WIN")])[0].outcome).toBe("WIN")
+    expect(mergeReads([c("WIN")], [c("LOSS")])[0].outcome).toBeNull()
+    expect(mergeReads([{ ...c("WIN"), outcome: undefined }], [c("LOSS")])[0].outcome).toBe("LOSS")
+  })
+})
+
+describe("finding a leg's result by the colour of its ring", () => {
+  const W = 1000
+  const H = 300
+  const LIME: [number, number, number] = [108, 240, 20]
+  const SCARLET: [number, number, number] = [235, 50, 60]
+  function screen(paint: (x: number, y: number) => [number, number, number] | null): Pixels {
+    const data = new Uint8ClampedArray(W * H * 4)
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const i = (y * W + x) * 4
+        const c = paint(x, y) ?? [24, 24, 36]
+        data.set([c[0], c[1], c[2], 255], i)
+      }
+    }
+    return { width: W, height: H, data }
+  }
+  // A ring 5 pixels thick, centred at 18.5% of the width.
+  const ring = (colour: [number, number, number]) => (x: number, y: number) => {
+    const d = Math.hypot(x - 185, y - 150)
+    return d >= 50 && d < 55 ? colour : null
+  }
+  const nameRow = { x0: 250, y0: 120, x1: 700, y1: 145 }
+
+  it("reads green as a hit, red as a miss, and neither as open", () => {
+    expect(outcomeAt(screen(ring(LIME)), nameRow)).toBe("WIN")
+    expect(outcomeAt(screen(ring(SCARLET)), nameRow)).toBe("LOSS")
+    expect(outcomeAt(screen(ring([200, 200, 200])), nameRow)).toBeNull()
+  })
+
+  it("is not fooled by the green progress bar of the leg above", () => {
+    // A hit's bar runs lime from the ring's band right across the row.
+    const bar = (x: number, y: number) => (y >= 120 && y < 130 && x > 132 && x < 900 ? LIME : null)
+    expect(outcomeAt(screen((x, y) => bar(x, y) ?? ring(SCARLET)(x, y)), nameRow)).toBe("LOSS")
+    expect(outcomeAt(screen(bar), { ...nameRow, y1: 130 })).toBeNull()
+  })
+
+  it("ignores a coloured face out at the line value", () => {
+    const face = (x: number, y: number) => (x >= 690 && x < 720 && y >= 120 && y < 145 ? SCARLET : null)
+    expect(outcomeAt(screen(face), nameRow)).toBeNull()
+  })
+
+  it("scales a box from the cleaned read back to the original pixels", () => {
+    const px = screen(ring(LIME))
+    const lines: OcrLine[] = [{ text: "Jalen Johnson V 21.5", bbox: { x0: 500, y0: 240, x1: 1400, y1: 290 } }, { text: "typed" }]
+    const [tagged, typed] = tagOutcomes(
+      lines,
+      px,
+      2,
+    )
+    expect(tagged.outcome).toBe("WIN")
+    expect("outcome" in typed).toBe(false)
   })
 })
 
