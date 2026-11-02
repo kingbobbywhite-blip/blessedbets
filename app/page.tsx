@@ -8,7 +8,6 @@ import { SlipCard } from "@/components/slip-card"
 import { StatTile } from "@/components/stat-tile"
 import { ValueBetRow } from "@/components/value-bet-row"
 import { DfsTargetRow } from "@/components/dfs-target-row"
-import { PayoutCapture } from "@/components/payout-capture"
 import { SideBadge } from "@/components/side-badge"
 import { CompetitionBadge } from "@/components/competition-badge"
 import {
@@ -28,19 +27,16 @@ import { DEFAULT_CORRELATION } from "@/lib/quant/correlation"
 import { bookProfile, isSharp } from "@/lib/quant/books"
 import {
   DEFAULT_APPS,
-  capturedFromMode,
   findApp,
   findMode,
-  capturedPayoutChanged,
   offeredMultiples,
   payoutKey,
   pickemBar,
-  validateCapture,
   pickemPricingModeFor,
-  type CapturedPayout,
+  supportedPickCounts,
 } from "@/lib/quant/payouts"
 import type { FeedQuote } from "@/lib/quant/valuebets"
-import { buildPickemEntry, hasAppLines, pickemPlays, sideBars, upcomingQuotes } from "@/lib/today/build"
+import { bestPickemLegs, hasAppLines, pickemPlays, sideBars, upcomingQuotes } from "@/lib/today/build"
 import { useDailyPicks, type PickInputs } from "@/hooks/use-daily-picks"
 import { snapshotFor } from "@/lib/quant/lines"
 import { entryExpectation } from "@/lib/tracker/entries"
@@ -205,53 +201,11 @@ export default function TodayPage() {
   const entryMode = findMode(entryApp, s.defaultModeId)
   // The payout read off your own screen for this exact entry size, if there
   // is one. It beats every stored table, because it is the only one anybody
-  // has actually read.
-  const payoutSlot = payoutKey(s.defaultAppId, s.defaultModeId, s.constraints.picks)
-  const savedPayout = s.capturedPayouts[payoutSlot] ?? null
-  // What the capture form is showing. Seeded from the saved capture when there
-  // is one, else from the stored table so the form starts somewhere rather
-  // than blank — the seed is never treated as read, only as a starting point,
-  // because `confirmed` is what makes a capture count.
-  const [capture, setCapture] = React.useState<CapturedPayout | null>(null)
-  const seededCapture = React.useMemo<CapturedPayout>(() => {
-    if (savedPayout) return savedPayout
-    if (entryMode) return capturedFromMode(entryMode, s.constraints.picks)
-    // capturedAt is stamped when the form is confirmed, so an unconfirmed
-    // seed's value never reaches storage; a fixed one keeps this memo from
-    // changing identity every time the minute clock ticks.
-    return { picks: s.constraints.picks, tiers: {}, confirmed: false, capturedAt: "" }
-  }, [savedPayout, entryMode, s.constraints.picks])
-  // A change of app, mode or entry size is a different payout, so the form
-  // follows it rather than keeping a number read for something else.
-  React.useEffect(() => setCapture(null), [payoutSlot])
-  const captureValue = capture ?? seededCapture
-
-  /**
-   * Only a confirmed capture is stored; anything else is a half-typed table.
-   *
-   * And settings are only touched when what is STORED would actually change.
-   * Every write persists the whole state blob, which on a full slate is
-   * megabytes of quotes, so writing once per keystroke made typing a payout
-   * in re-serialise the entire cache on every character. The in-progress form
-   * lives in React state, where it costs nothing.
-   */
-  const saveCapture = React.useCallback(
-    (next: CapturedPayout) => {
-      setCapture(next)
-      if (!capturedPayoutChanged(savedPayout, next)) return
-      const keep = next.confirmed && validateCapture(next).length === 0
-      setSettings((prev) => {
-        // Keyed off prev, not the render's slot: the two agree unless the app,
-        // mode or size changed in between, and then prev is the right one.
-        const slot = payoutKey(prev.defaultAppId, prev.defaultModeId, prev.constraints.picks)
-        const kept = { ...prev.capturedPayouts }
-        if (keep) kept[slot] = next
-        else delete kept[slot]
-        return { ...prev, capturedPayouts: kept }
-      })
-    },
-    [setSettings, savedPayout],
-  )
+  // has actually read. This screen no longer asks for one — it reports picks
+  // rather than prices a specific entry, and reading a payout in belongs on
+  // Build, where that is the whole job — but one read there or on an earlier
+  // version is still the best payout available and still prices the bar.
+  const savedPayout = s.capturedPayouts[payoutKey(s.defaultAppId, s.defaultModeId, s.constraints.picks)] ?? null
 
   // The bar a pick'em leg has to clear. It is not a priced number: it is read
   // off a stored payout table, and every table this app ships is one nobody
@@ -327,11 +281,21 @@ export default function TodayPage() {
   // A build that failed says so, rather than reading as a slate with nothing in it.
   const buildError = builtHere ? built.error : null
 
-  // A ready-to-play pick'em entry at the default app's size and table.
-  const entry = React.useMemo(
-    () => (picks ? buildPickemEntry(picks.dfsTargets, s.constraints.picks, bars, 2, s.defaultAppId, now) : null),
+  /**
+   * The picks to play: the best plays on the board that clear the bar, at most
+   * one entry's worth of them.
+   *
+   * Short of the entry size is a real answer, not a failure. Everything below
+   * the bar is left out rather than padded in, so a list of three where the
+   * entry wants five says the slate had three worth playing — play it at three
+   * or pass. Empty says nothing here is worth playing at all, which is the one
+   * answer this section exists to be able to give.
+   */
+  const best = React.useMemo(
+    () => (picks ? bestPickemLegs(picks.dfsTargets, s.constraints.picks, bars, 2, s.defaultAppId, now) : []),
     [picks, s.constraints.picks, bars, s.defaultAppId, now],
   )
+  const fullEntry = best.length > 0 && best.length === s.constraints.picks
   // What the entry could not use, and why. An entry at the app's own lines
   // leaves out every prop it has no line for, and the difference between "the
   // app is not offering it" and "we never heard" is the user's to see.
@@ -354,8 +318,18 @@ export default function TodayPage() {
   // nothing, so it survives an unverified one. The expected value is a sum
   // over the table's tiers and does not, so it is withheld rather than
   // invented. The cut is exact rather than blunt.
-  const entryExp = entry && pricingMode ? entryExpectation(entry.map((l) => l.prob), pricingMode) : null
-  const entryAllHit = entry ? entry.reduce((a, l) => a * l.prob, 1) : null
+  //
+  // A table is indexed by entry size and says nothing about a size it does not
+  // list. Pricing against a missing size reads every outcome as a zero payout,
+  // which would print a confident -100% on a perfectly good three-pick, so a
+  // list the table does not cover has no expected value rather than a wrong
+  // one.
+  const bestExp = React.useMemo(() => {
+    if (best.length === 0 || !pricingMode) return null
+    if (!supportedPickCounts(pricingMode).includes(best.length)) return null
+    return entryExpectation(best.map((l) => l.prob), pricingMode)
+  }, [best, pricingMode])
+  const bestAllHit = best.length > 0 ? best.reduce((a, l) => a * l.prob, 1) : null
   /**
    * Flavoured lines the default app is posting on this board.
    *
@@ -417,9 +391,9 @@ export default function TodayPage() {
         )
       : picks.dfsTargets
     const top = ranked.slice(0, 30)
-    const extra = (entry ?? []).map((l) => l.target).filter((t) => !top.includes(t))
+    const extra = best.map((l) => l.target).filter((t) => !top.includes(t))
     return [...top, ...extra]
-  }, [picks, entry, plays, appLinesLive])
+  }, [picks, best, plays, appLinesLive])
 
   // Books you bet at that the cached pull has no prices from, usually because
   // the pull predates adding them. Refreshing brings them in.
@@ -872,117 +846,124 @@ export default function TodayPage() {
               </section>
             )}
 
-            {picks.dfsTargets.length > 0 ? (
-              <section className="space-y-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                  <h2 className="font-mono text-xs uppercase tracking-[0.14em] text-primary">
-                    Pick&apos;em entry · {entryApp?.name ?? "your app"} {s.constraints.picks}-pick {entryMode?.label ?? ""}
-                  </h2>
-                  {/* The bar below is read off this table, so whether anybody
-                      has checked it belongs next to the heading rather than
-                      buried in Settings. */}
-                  {bar.source === "captured" ? (
-                    <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-primary">
-                      payout read {shortDate(bar.capturedAt ?? "")}
-                    </span>
-                  ) : bar.source === "tracked" && bar.tracked ? (
-                    <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-primary">
-                      bar at {bar.tracked.multiple}x, the lowest of your last {bar.tracked.entries} logged
-                    </span>
-                  ) : bar.source === "placeholder" ? (
-                    <span className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.14em] text-accent">
-                      <TriangleAlert className="size-3" /> no payout table
-                    </span>
-                  ) : (
-                    <span className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.14em] text-accent">
-                      <TriangleAlert className="size-3" /> payouts unverified
-                    </span>
-                  )}
-                </div>
+            {/*
+                The pick'em verdict, said plainly: the best picks on the board,
+                or that there are none worth playing.
 
-                {/* The bar below is read off a payout table, and a goblin or
-                    demon changes the entry's multiplier rather than the leg's,
-                    so a standard table cannot describe an entry holding one.
-                    Four settled entries put real numbers on what that costs. */}
-                {bar.source !== "captured" && flavouredOnBoard > 0 ? (
-                  <p className="flex items-start gap-1.5 rounded-lg border border-accent/40 bg-accent/5 p-2.5 text-[11px] leading-relaxed text-muted-foreground">
-                    <TriangleAlert className="mt-0.5 size-3 shrink-0 text-accent" />
-                    <span>
-                      <strong className="font-semibold text-foreground">
-                        The {pct(bar.prob)} bar is a floor, not the bar.
-                      </strong>{" "}
-                      {entryApp?.name ?? "This app"} is posting a goblin or demon on {flavouredOnBoard} of these props,
-                      and a flavoured pick changes the multiplier for the whole entry rather than for its own leg — so
-                      a standard table cannot describe an entry that holds one, and it errs low every time. Read the{" "}
-                      &ldquo;$X for $Y&rdquo; off your own entry screen below and this becomes the real bar.
-                    </span>
-                  </p>
+                Nothing here asks for a payout to be typed in. This section
+                reports picks rather than prices one specific entry, and a form
+                that had to be filled in before the numbers meant anything sat
+                between the reader and the only thing they came for. Reading a
+                payout off your own screen still happens, on Build, where
+                pricing an exact entry is the whole job — and a payout read
+                there still sets the bar here.
+            */}
+            <section
+              className={
+                best.length > 0
+                  ? "space-y-3 rounded-lg border border-primary/30 bg-primary/5 p-4"
+                  : "space-y-2 rounded-lg border border-dashed border-border/60 p-5"
+              }
+            >
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <h2
+                  className={
+                    best.length > 0
+                      ? "font-mono text-xs uppercase tracking-[0.14em] text-primary"
+                      : "font-mono text-xs uppercase tracking-[0.14em] text-muted-foreground"
+                  }
+                >
+                  Pick&apos;em · {entryApp?.name ?? "your app"} {s.constraints.picks}-pick{" "}
+                  {entryMode?.label ?? ""}
+                </h2>
+                {best.length > 0 ? (
+                  <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-primary">
+                    {fullEntry
+                      ? `${best.length} picks · a full entry`
+                      : `${best.length} playable · short of ${s.constraints.picks}`}
+                  </span>
                 ) : null}
+              </div>
 
-                <details className="rounded-lg border border-border/60 bg-card/30">
-                  <summary className="cursor-pointer px-3 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                    {bar.source === "captured" ? "Payout you read in" : "Read in the payout your app shows"}
-                  </summary>
-                  <div className="px-3 pb-3">
-                    <PayoutCapture
-                      value={captureValue}
-                      onChange={saveCapture}
-                      suggestedFrom={`${entryApp?.name ?? ""} ${entryMode?.label ?? ""}`.trim()}
-                    />
-                  </div>
-                </details>
-                {entry ? (
-                  <>
-                    <ul className="divide-y divide-border/40 text-sm">
-                      {entry.map((l) => (
-                        <li key={l.target.key} className="flex items-center justify-between gap-2 py-1.5">
-                          <span className="flex min-w-0 items-center gap-1.5">
-                            <span className="font-medium">{l.target.player}</span>
-                            <CompetitionBadge competition={l.target.competition} />
-                            <span className="font-mono text-[10px] text-muted-foreground">{l.target.marketLabel}</span>
-                          </span>
-                          <span className="flex items-center gap-1.5 font-mono text-xs">
-                            <SideBadge side={l.side} /> {l.line} · {pct(l.prob, 0)}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                    <p className="text-[11px] leading-relaxed text-muted-foreground">
-                      {entryAllHit != null ? `All ${entry.length} hit ${pct(entryAllHit, 1)} of the time. ` : ""}
-                      {entryExp
-                        ? `At ${possessive(entryApp?.name ?? "the app")} ${entryMode?.label ?? ""} table, read on ${entryApp?.verifiedOn}, that is ${signedPct(entryExp.ev)} expected per entry. `
-                        : `There is no expected value here, and that is deliberate: an expected value is the payout table's number as much as the legs', and ${bar.source === "placeholder" ? `no stored table covers a ${s.constraints.picks}-pick ${entryMode?.label ?? "entry"}` : `nobody has confirmed ${possessive(entryApp?.name ?? "this app")} stored table against a real entry screen`}. The chance above owes the table nothing, so it stands. Read the payout off your own entry screen above and it appears. `}
-                      One leg per player — keyed on the player and blind to the market, so it never holds a man&apos;s
-                      points beside his pts+reb+ast, or his steals beside his steals+blocks — and at most two per
-                      game.{" "}
-                      {appLinesLive
-                        ? `Every line here is ${possessive(entryApp?.name ?? "the app")} own, read through PropLine at ${shortDate(daily!.fetchedAt)}, and each chance is the books' consensus at that exact line. The entry is never built at a line ${entryApp?.name ?? "the app"} may not be posting, so a prop with no line from it is left out whichever reason it has.${leftOutText ? ` ${leftOutText}` : ""} Lines move: if one on your screen differs, check it in the table below.`
-                        : `No ${entryApp?.name ?? "app"} lines came through in this pull, so every line here is the books' own — the number to go and look for, not one ${entryApp?.name ?? "the app"} is known to be posting. PrizePicks, Underdog, Sleeper and Real almost always copy it; check each one on your screen before playing it.`}{" "}
-                      {bar.source === "captured"
-                        ? "Standard picks only. A goblin or demon would change the multiplier, and the payout read in above is for the entry as it stands. "
-                        : "Standard picks only — and if you add a goblin or demon yourself, the multiplier drops and this bar becomes too easy, which is the single commonest way an entry that looked like a target was not one. Read your payout in above and the bar follows it. "}
-                      Legs are treated as independent, which
-                      is safe here rather than a shortcut: there is no same-player pair in the entry at all, and at
-                      most two per game leaves only shared game pace, which is small and pulls the answer the
-                      pessimistic way.
-                    </p>
-                  </>
-                ) : (
+              {best.length > 0 ? (
+                <>
+                  <ul className="divide-y divide-border/40 text-sm">
+                    {best.map((l) => (
+                      <li key={l.target.key} className="flex items-center justify-between gap-2 py-1.5">
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <span className="font-medium">{l.target.player}</span>
+                          <CompetitionBadge competition={l.target.competition} />
+                          <span className="font-mono text-[10px] text-muted-foreground">{l.target.marketLabel}</span>
+                        </span>
+                        <span className="flex items-center gap-1.5 font-mono text-xs">
+                          <SideBadge side={l.side} /> {l.line} · {pct(l.prob, 0)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
                   <p className="text-[11px] leading-relaxed text-muted-foreground">
-                    Fewer than {s.constraints.picks} props clear the {pct(bar.prob)} bar on this slate, one per
-                    player{appLinesLive ? `, at the lines ${entryApp?.name ?? "the app"} is actually posting` : ""}.
-                    Padding the entry with coin flips is the bet the bar exists to stop: play a smaller entry, or pass.
-                    {underMargin > 0 ? ` Unders have to clear ${pct(bars.under)}, with your margin on ${league.short} unders.` : ""}
-                    {appLinesLive && leftOutText ? ` ${leftOutText}` : ""}
+                    {bestAllHit != null
+                      ? `All ${best.length} hit ${pct(bestAllHit, 1)} of the time${
+                          bestExp ? `, which is ${signedPct(bestExp.ev)} expected per entry at ${possessive(entryApp?.name ?? "the app")} ${entryMode?.label ?? ""} table` : ""
+                        }. `
+                      : ""}
+                    {/* A short list is the honest answer and it is also a
+                        different entry: the bar was set by the entry size in
+                        Settings, and a smaller entry pays on its own table. */}
+                    {!fullEntry
+                      ? `Only ${best.length} play${best.length === 1 ? "" : "s"} on this slate clear${best.length === 1 ? "s" : ""} the ${pct(bar.prob)} bar, so play ${best.length === 1 ? "it" : "them"} as a ${best.length}-pick or pass — padding an entry out with props below the bar is the bet the bar exists to stop. A ${best.length}-pick pays on its own table, so check what yours offers for one before you stake it. `
+                      : ""}
+                    One leg per player — keyed on the player and blind to the market, so it never holds a man&apos;s
+                    points beside his pts+reb+ast — and at most two per game.{" "}
+                    {appLinesLive
+                      ? `Every line here is ${possessive(entryApp?.name ?? "the app")} own, read through PropLine at ${shortDate(daily!.fetchedAt)}, and each chance is the books' consensus at that exact line.${leftOutText ? ` ${leftOutText}` : ""} Lines move: if one on your screen differs, check it in the table below.`
+                      : `No ${entryApp?.name ?? "app"} lines came through in this pull, so every line here is the books' own — the number to go and look for, not one ${entryApp?.name ?? "the app"} is known to be posting. Check each one on your screen before playing it.`}{" "}
+                    Standard picks only: a goblin or demon changes the multiplier for the whole entry rather than for
+                    its own leg, so it needs its own bar.
+                    {flavouredOnBoard > 0
+                      ? ` ${entryApp?.name ?? "This app"} is posting one on ${flavouredOnBoard} of these props, so the ${pct(bar.prob)} bar is a floor for any entry that picks one up.`
+                      : ""}{" "}
+                    {bar.source === "captured"
+                      ? `The bar is the payout you read in on ${shortDate(bar.capturedAt ?? "")}.`
+                      : bar.source === "tracked" && bar.tracked
+                        ? `The bar is set at ${bar.tracked.multiple}x, the lowest "if every leg hits" payout among your last ${bar.tracked.entries} logged entries of this size, rather than the stored table's.`
+                        : bar.source === "placeholder"
+                          ? `The ${pct(bar.prob)} bar is a placeholder: no stored payout covers a ${s.constraints.picks}-pick ${entryMode?.label ?? "entry"}, so the line between a pick and a pass is softer than it looks. Read your real payout in on Build to price this exactly.`
+                          : !bar.verified
+                            ? `The ${pct(bar.prob)} bar comes from a stored payout table nobody has confirmed against a real entry screen, so treat it as a guide. Read your real payout in on Build to price this exactly.`
+                            : ""}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm font-medium text-foreground">
+                    There are none in the pick&apos;em section that you can play.
+                  </p>
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                    {picks.dfsTargets.length === 0
+                      ? `Nothing on this slate priced as a pick'em target${picks.lopsided.length > 0 ? `: every prop that priced was more lopsided than the ${pct(s.daily.pickemMaxProb, 0)} ceiling set in Settings, and they are listed below` : ""}. `
+                      : `${picks.dfsTargets.length} prop${picks.dfsTargets.length === 1 ? "" : "s"} priced as a pick'em target, and not one of them clears the ${pct(bar.prob)} bar for a ${s.constraints.picks}-pick ${entryMode?.label ?? "entry"}${appLinesLive ? ` at the lines ${entryApp?.name ?? "the app"} is posting` : ""}. `}
+                    {underMargin > 0
+                      ? `An under also has to clear ${pct(bars.under)}, with your margin on ${league.short} unders. `
+                      : ""}
+                    {appLinesLive && leftOutText ? `${leftOutText} ` : ""}
+                    Padding an entry out with props below the bar is the bet the bar exists to stop, so there is
+                    nothing to hand you here.
+                    {/* Only promise rows that are actually on the page: the
+                        targets table renders on targets or lopsided props, and
+                        on a slate with neither there is nothing below. */}
+                    {picks.dfsTargets.length > 0
+                      ? " The targets below are still worth a look — a line of your own typed into one of those rows can change the answer."
+                      : ""}
                     {bar.source === "placeholder"
-                      ? ` That bar is a placeholder, not a table: no stored payout covers a ${s.constraints.picks}-pick ${entryMode?.label ?? "entry"}.`
+                      ? ` That bar is a placeholder: no stored payout covers a ${s.constraints.picks}-pick ${entryMode?.label ?? "entry"}.`
                       : !bar.verified
-                        ? " That bar comes from a payout table nobody has confirmed against a real entry screen, so treat it as a guide rather than a threshold."
+                        ? " That bar comes from a stored payout table nobody has confirmed against a real entry screen, so treat it as a guide rather than a threshold."
                         : ""}
                   </p>
-                )}
-              </section>
-            ) : null}
+                </>
+              )}
+            </section>
 
             {picks.dfsTargets.length > 0 || picks.lopsided.length > 0 ? (
               <section className="space-y-3">

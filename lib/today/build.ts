@@ -909,25 +909,26 @@ export function hasAppLines(targets: Pick<DfsTarget, "appLines">[], app: string 
 }
 
 /**
- * A pick'em entry to play: the likeliest plays that clear the bar.
+ * The best plays on the board, likeliest first, at most `size` of them.
  *
  * One leg per player, so it never holds both sides of anything, and at most
- * two per game, so one blowout cannot sink the whole entry. Null when fewer
- * plays clear the bar than the entry needs: a short entry padded with coin
- * flips is the bet the bar exists to stop.
+ * two per game, so one blowout cannot sink the whole entry. Everything below
+ * the bar is left out rather than padded in, so a short list is the board
+ * being short of plays and never the rules being relaxed to fill an entry.
+ * An empty list means nothing on this slate is worth playing.
  *
  * Every leg is at a line the named app is really posting, or — when the pull
  * carried none of that app's lines — every leg is at the books' line. Never a
  * mixture of the two. See pickemPlays for why, and for what gets left out.
  */
-export function buildPickemEntry(
+export function bestPickemLegs(
   targets: DfsTarget[],
   size: number,
   bar: number | SideBars,
   maxPerGame = 2,
   app?: string | null,
   now: number = Date.now(),
-): PickemLeg[] | null {
+): PickemLeg[] {
   const { plays } = pickemPlays(targets, app, now)
   const bars = asBars(bar)
 
@@ -949,6 +950,27 @@ export function buildPickemEntry(
     games.set(t.gameId, (games.get(t.gameId) ?? 0) + 1)
     legs.push(play)
   }
+  return legs
+}
+
+/**
+ * A pick'em entry at exactly the size asked for, or null.
+ *
+ * The legs are bestPickemLegs; the only thing this adds is the refusal to
+ * return a short one, which matters where the size is the thing being priced:
+ * an entry of a different size is a different payout table, so a 3-pick list
+ * cannot stand in for the 5-pick entry a caller asked to price. A caller that
+ * wants whatever the board does offer asks bestPickemLegs directly.
+ */
+export function buildPickemEntry(
+  targets: DfsTarget[],
+  size: number,
+  bar: number | SideBars,
+  maxPerGame = 2,
+  app?: string | null,
+  now: number = Date.now(),
+): PickemLeg[] | null {
+  const legs = bestPickemLegs(targets, size, bar, maxPerGame, app, now)
   return legs.length === size ? legs : null
 }
 

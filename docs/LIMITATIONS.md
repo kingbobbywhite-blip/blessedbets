@@ -7,8 +7,8 @@ Read this before betting real money.
 This app does not create an edge. It stops you acting on ones that are not there.
 
 Everything it does well is subtractive: refusing to price props with no market behind them,
-forcing you to read the payout off your own screen, printing the break-even next to every
-expected value, marking retail-only prices as weaker than sharp ones. None of that finds you
+pricing an exact entry only against a payout you read off your own screen, printing the
+break-even next to every expected value, marking retail-only prices as weaker than sharp ones. None of that finds you
 money. It stops you giving money away to your own bad inputs.
 
 **A +15% expected value reading is almost always a bad input.** In that order of likelihood:

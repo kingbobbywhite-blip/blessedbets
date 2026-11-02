@@ -307,7 +307,7 @@ describe("sorting picks by probability", () => {
   })
 })
 
-import { buildPickemEntry, type DfsTarget } from "@/lib/today/build"
+import { bestPickemLegs, buildPickemEntry, type DfsTarget } from "@/lib/today/build"
 
 describe("a pick'em entry to play", () => {
   // `market` defaults to PTS so the cases below keep the meaning they had: the
@@ -383,6 +383,38 @@ describe("a pick'em entry to play", () => {
 
   it("refuses to pad an entry with legs below the bar", () => {
     expect(buildPickemEntry([t("A", "g1", 0.7), t("B", "g2", 0.52)], 2, 0.577)).toBeNull()
+  })
+
+  // The Today screen reports the picks worth playing rather than pricing one
+  // entry of a fixed size, so it asks for the legs themselves and decides what
+  // to say about a short list. buildPickemEntry's null is the stricter contract
+  // on top, for callers where the size is the thing being priced.
+  it("hands back a short list rather than nothing when the board is thin", () => {
+    const targets = [t("A", "g1", 0.7), t("B", "g2", 0.52)]
+    expect(bestPickemLegs(targets, 2, 0.577).map((l) => l.target.player)).toEqual(["A"])
+    expect(buildPickemEntry(targets, 2, 0.577)).toBeNull()
+  })
+
+  it("hands back nothing at all when no play clears the bar", () => {
+    // The one answer the section exists to be able to give: not a thin entry,
+    // not a padded one, nothing to play.
+    expect(bestPickemLegs([t("A", "g1", 0.54), t("B", "g2", 0.52)], 3, 0.577)).toEqual([])
+  })
+
+  it("applies the same one-per-player and two-per-game limits to a short list", () => {
+    // A short list is short because the board was, never because the rules were
+    // relaxed to fill it out.
+    const legs = bestPickemLegs(
+      [t("A", "g1", 0.7), t("A", "g1", 0.69, "OVER"), t("B", "g1", 0.68), t("C", "g1", 0.66)],
+      5,
+      0.55,
+    )
+    expect(legs.map((l) => l.target.player)).toEqual(["A", "B"])
+  })
+
+  it("never returns more legs than the entry has room for", () => {
+    const legs = bestPickemLegs([t("A", "g1", 0.7), t("B", "g2", 0.68), t("C", "g3", 0.66)], 2, 0.55)
+    expect(legs.map((l) => l.target.player)).toEqual(["A", "B"])
   })
 })
 

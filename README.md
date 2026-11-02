@@ -183,9 +183,14 @@ at least as likely to hit as not, and only within a single book, because a leg a
 cannot be combined with a leg at FanDuel onto one ticket. Correlation between legs is priced
 rather than ignored.
 
-**Pick'em entry.** The likeliest targets that clear the bar: one leg per player, at most two
-per game, with the chance they all hit and the expected return at your default app's payout
-table. If too few clear, it says so rather than padding the entry with coin flips.
+**Pick'em.** The best picks on the board that clear the bar, at most one entry's worth: one leg
+per player, at most two per game, with the chance they all hit and the expected return at your
+default app's payout table. Nothing below the bar is ever padded in, so a list shorter than your
+entry size is the honest answer — play it at that size or pass — and when nothing clears the bar
+the section says, in as many words, that there are none in the pick'em section you can play. It
+asks for no payout to be typed in before it will answer: reading one off your own screen lives on
+**Build**, where pricing one exact entry is the whole job, and a payout read there still sets the
+bar here.
 
 **Every line on the card is the app's own, or none of them is.** An entry is built at your
 default app's real lines, read through PropLine, or at the books' lines when the pull carried
@@ -365,18 +370,19 @@ payout table cannot describe an entry that holds one, and the bar it produces er
 Four real settled Power Plays paid 8x, 8.5x, 4.5x and 3.75x where the stored tables said 10x, 10x,
 6x and 6x — a per-leg break-even of 59-64% where the app was showing 55-56%, understating the
 worst of them by **nine points**. Eight of those fourteen legs were goblins or demons. Whenever
-your app is posting a flavoured line on the board, the bar is labelled a floor rather than the
-bar, and the fix is on the same card: read the "$X for $Y" off your own entry screen and it
-becomes the real bar, the expected value appears, and it is remembered for that app, mode and
-entry size.
+your app is posting a flavoured line on the board, the pick'em note says the bar is a floor for
+any entry that picks one up. The fix is on **Build**: read the "$X for $Y" off your own entry
+screen there and it becomes the real bar, the expected value appears, and it is remembered for
+that app, mode and entry size — including on the Today screen, which reads a payout captured
+there and never asks for one of its own.
 
 **PrizePicks varies the multiplier on standard entries too.** Two real Power Plays of three
 standard picks, no goblins or demons, paid 6x and 5.5x. So the stored 3-pick is the lower of the
 two, and below a payout you read in, the bar comes from your own logged entries: the lowest "if
 every leg hits" payout among your last five logged entries of the same app, mode and size, of
 standard picks only, wherever that is below the stored table. A leg has to clear the bar at the
-payout the entry may actually get, and the heading on the entry card says which number the bar
-is using.
+payout the entry may actually get, and the note under the picks says which number the bar is
+using.
 
 **An under in the NBA has to clear a little more.** Unders have not worked as well in the NBA in
 the experience of the person this is built for, and it came up over a 4-pick of four NBA unders.
