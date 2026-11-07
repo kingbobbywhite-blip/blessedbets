@@ -73,7 +73,7 @@ describe("bettable books", () => {
   })
 })
 
-import { DEFAULT_ODDS_FEED, migrate } from "@/lib/store/schema"
+import { DEFAULT_ODDS_FEED, marketsFor, migrate, withMarketsFor } from "@/lib/store/schema"
 import { LEAGUES, maxGamesFor } from "@/lib/leagues"
 
 describe("the books in the rotation", () => {
@@ -150,8 +150,11 @@ describe("PropLine settings", () => {
     // and say what it meant rather than quietly tracking a formula.
     expect(DEFAULT_ODDS_FEED.provider).toBe("propline")
     expect(DEFAULT_SETTINGS.daily.maxGames).toBe(15)
-    // And a blank market list, so the per-request board is pulled whole.
-    expect(DEFAULT_SETTINGS.daily.markets).toBeNull()
+    // And no market list for either feed, so each pulls its league's own:
+    // the whole board on PropLine, the five-market budget on The Odds API.
+    expect(DEFAULT_SETTINGS.daily.markets).toEqual({})
+    expect(marketsFor(DEFAULT_SETTINGS.daily, "propline")).toBeNull()
+    expect(marketsFor(DEFAULT_SETTINGS.daily, "theoddsapi")).toBeNull()
   })
 
   it("moves an install that never chose a feed onto PropLine, once, and only with a key", () => {
@@ -175,34 +178,76 @@ describe("PropLine settings", () => {
     expect(again.settings.oddsFeed.provider).toBe("theoddsapi")
   })
 
-  it("clears a stored market list that was narrowing a per-request feed, once", () => {
-    // Four NBA markets on PropLine is four of eleven for the same requests.
-    const narrowed = migrate({
-      settings: {
-        oddsFeed: { provider: "propline", proplineKey: "pk" },
-        daily: { league: "nba", markets: ["player_points", "player_rebounds"] },
-      },
-    })
-    expect(narrowed.settings.daily.markets).toBeNull()
+  it("files a legacy market list under the feed it was typed for", () => {
+    const LIST = ["player_points", "player_rebounds"]
 
-    // The same list on The Odds API is a credit budget somebody meant.
-    const budget = migrate({
+    // Typed on The Odds API, where it is a credit budget. It stays there, and
+    // PropLine starts blank so it pulls the whole free board.
+    const onOddsApi = migrate({
       settings: {
         oddsFeed: { provider: "theoddsapi", apiKey: "abc" },
-        daily: { league: "nba", markets: ["player_points", "player_rebounds"] },
+        daily: { league: "nba", markets: LIST },
       },
     })
-    expect(budget.settings.daily.markets).toEqual(["player_points", "player_rebounds"])
+    expect(marketsFor(onOddsApi.settings.daily, "theoddsapi")).toEqual(LIST)
+    expect(marketsFor(onOddsApi.settings.daily, "propline")).toBeNull()
 
-    // Already upgraded: a list typed after the change is a choice and stays.
-    const after = migrate({
-      version: 2,
+    // The regression this shape removes. Same install, but holding a PropLine
+    // key, so the upgrade moves it to PropLine. The budget must not follow it
+    // across and must not be thrown away: blank on The Odds API is the
+    // five-market default, so clearing it takes a 14-game press from 56
+    // credits to 70 -- a bill raised by a migration, under the share that
+    // makes the button ask, so silently.
+    const moved = migrate({
+      settings: {
+        oddsFeed: { provider: "theoddsapi", apiKey: "abc", proplineKey: "pk" },
+        daily: { league: "nba", maxGames: 14, markets: LIST },
+      },
+    })
+    expect(moved.settings.oddsFeed.provider).toBe("propline")
+    expect(marketsFor(moved.settings.daily, "theoddsapi")).toEqual(LIST)
+    expect(marketsFor(moved.settings.daily, "propline")).toBeNull()
+
+    // Typed ON PropLine it was never a budget, and narrowing the free board
+    // only loses pick'em lines, so it goes. Clearing cannot raise a bill on a
+    // feed that charges per request whatever is asked for.
+    const onPropline = migrate({
       settings: {
         oddsFeed: { provider: "propline", proplineKey: "pk" },
-        daily: { league: "nba", markets: ["player_points"] },
+        daily: { league: "nba", markets: LIST },
       },
     })
-    expect(after.settings.daily.markets).toEqual(["player_points"])
+    expect(marketsFor(onPropline.settings.daily, "propline")).toBeNull()
+    expect(marketsFor(onPropline.settings.daily, "theoddsapi")).toBeNull()
+  })
+
+  it("keeps each feed's market list independent once stored per feed", () => {
+    const perFeed = migrate({
+      version: 3,
+      settings: {
+        oddsFeed: { provider: "propline", proplineKey: "pk" },
+        daily: {
+          league: "nba",
+          markets: { theoddsapi: ["player_points"], propline: ["player_points", "player_threes"] },
+        },
+      },
+    })
+    expect(marketsFor(perFeed.settings.daily, "theoddsapi")).toEqual(["player_points"])
+    expect(marketsFor(perFeed.settings.daily, "propline")).toEqual(["player_points", "player_threes"])
+
+    // Writing one feed's slot leaves the other alone, which is the whole point.
+    const next = withMarketsFor(perFeed.settings.daily.markets, "propline", null)
+    expect(marketsFor({ markets: next }, "propline")).toBeNull()
+    expect(marketsFor({ markets: next }, "theoddsapi")).toEqual(["player_points"])
+
+    // Junk in a slot reads as blank rather than being asked for.
+    const junk = migrate({
+      version: 3,
+      settings: { oddsFeed: { provider: "propline", proplineKey: "pk" },
+                  daily: { league: "nba", markets: { propline: [1, null, ""], theoddsapi: "nope" } } },
+    })
+    expect(marketsFor(junk.settings.daily, "propline")).toBeNull()
+    expect(marketsFor(junk.settings.daily, "theoddsapi")).toBeNull()
   })
 
   it("keeps the pick'em lines on a cached pull", () => {

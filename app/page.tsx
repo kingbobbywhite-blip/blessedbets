@@ -50,6 +50,7 @@ import { NO_SERVER_KEYS, hasFeedKey, parseServerKeys, type ServerKeys } from "@/
 import { usableKey } from "@/lib/odds-feed/api-key"
 import { notStarted } from "@/lib/odds-feed/http"
 import { useStore } from "@/lib/store/provider"
+import { marketsFor } from "@/lib/store/schema"
 import {
   LEAGUES,
   TAB_LEAGUE_IDS,
@@ -116,6 +117,10 @@ export default function TodayPage() {
 
   const s = state.settings
   const usePropline = s.oddsFeed.provider === "propline"
+  // The market list typed for THIS feed. Blank means the league's own, which
+  // is five markets on The Odds API and the whole board on PropLine -- the
+  // reason the list is stored per feed rather than shared.
+  const typedMarkets = marketsFor(s.daily, s.oddsFeed.provider)
   const hasKey = hasFeedKey(s.oddsFeed, serverKeys ?? NO_SERVER_KEYS)
   // Hold the setup card back until the server has said whether it has a key,
   // so an install set up through .env.local never flashes it.
@@ -176,7 +181,7 @@ export default function TodayPage() {
       pullPlan(leagueId, requestedMaxGames, { companions: wantCompanions, billsPerRequest: usePropline }).reduce(
         (a, p) =>
           a +
-          p.games * marketsForCompetition(p.league, s.daily.markets, { billsPerRequest: usePropline }).length +
+          p.games * marketsForCompetition(p.league, typedMarkets, { billsPerRequest: usePropline }).length +
           // A competition that chooses its games by market depth buys one
           // sport-level call to do it. Whether it fires depends on the slate
           // being bigger than the cap, which cannot be known before the press,
@@ -185,7 +190,7 @@ export default function TodayPage() {
           (p.league.depthRanked ? 1 : 0),
         0,
       ),
-    [leagueId, requestedMaxGames, s.daily.markets, wantCompanions, usePropline],
+    [leagueId, requestedMaxGames, typedMarkets, wantCompanions, usePropline],
   )
   const cost = usePropline
     ? { message: null, severe: false, confirm: false, prompt: null, credits: 0 }
@@ -473,7 +478,7 @@ export default function TodayPage() {
           companions: wantCompanions,
           from: start.toISOString(),
           to: end.toISOString(),
-          markets: s.daily.markets ?? undefined,
+          markets: typedMarkets ?? undefined,
           // References plus every book you can bet at. The feed bills per ten
           // bookmakers as one region, so up to ten costs the same as five.
           bookmakers: Array.from(new Set([...s.oddsFeed.books, ...s.oddsFeed.bettable])).slice(0, 10),

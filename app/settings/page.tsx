@@ -17,7 +17,7 @@ import { exportState, importState } from "@/lib/store/local"
 import { useStore } from "@/lib/store/provider"
 import { companionsOf, creditPlan, leagueFor, maxGamesFor, pullPlan, reseedGameCap } from "@/lib/leagues"
 import { marketsForCompetition, marketsForLeague } from "@/lib/odds-feed/theoddsapi"
-import { DEFAULT_SETTINGS, type OddsProvider } from "@/lib/store/schema"
+import { DEFAULT_SETTINGS, marketsFor, withMarketsFor, type OddsProvider } from "@/lib/store/schema"
 import { money } from "@/lib/format"
 
 const TAB = "px-1.5 text-xs sm:px-2 sm:text-sm"
@@ -29,7 +29,14 @@ export default function SettingsPage() {
   // Width is free on a per-request feed, so what a press actually asks for
   // depends on which feed is selected.
   const billsPerRequest = s.oddsFeed.provider === "propline"
-  const dailyMarkets = marketsForLeague(dailyLeague.id, s.daily.markets, { billsPerRequest })
+  // The list typed for THIS feed. Stored per feed because blank means five
+  // markets a game on The Odds API and the whole free board on PropLine, so
+  // one shared box made switching feed change the bill invisibly.
+  const typedMarkets = marketsFor(s.daily, s.oddsFeed.provider)
+  const otherFeed: OddsProvider = billsPerRequest ? "theoddsapi" : "propline"
+  const otherFeedLabel = billsPerRequest ? "The Odds API" : "PropLine"
+  const otherFeedMarkets = marketsFor(s.daily, otherFeed)
+  const dailyMarkets = marketsForLeague(dailyLeague.id, typedMarkets, { billsPerRequest })
   // What a typed market list is costing on a feed that does not charge for
   // width. Narrowing a per-market feed is a budget; narrowing a per-request
   // one is a straight loss, and the board cannot say so in the abstract -- it
@@ -46,7 +53,7 @@ export default function SettingsPage() {
     // Including the ranking call a depth-ranked companion buys, so this agrees
     // with the figure the Today screen gates on.
     (a, p) =>
-      a + p.games * marketsForCompetition(p.league, s.daily.markets, { billsPerRequest }).length +
+      a + p.games * marketsForCompetition(p.league, typedMarkets, { billsPerRequest }).length +
       (p.league.depthRanked ? 1 : 0),
     0,
   )
@@ -468,11 +475,11 @@ export default function SettingsPage() {
                         <>
                           it costs credits on top of the {dailyLeague.label} slate:{" "}
                           {companions
-                            .map((l) => `${maxGamesFor(l)} games at ${marketsForCompetition(l, s.daily.markets).length} markets`)
+                            .map((l) => `${maxGamesFor(l)} games at ${marketsForCompetition(l, typedMarkets).length} markets`)
                             .join(", ")}
                           , so about{" "}
                           {companions.reduce(
-                            (a, l) => a + maxGamesFor(l) * marketsForCompetition(l, s.daily.markets).length,
+                            (a, l) => a + maxGamesFor(l) * marketsForCompetition(l, typedMarkets).length,
                             0,
                           )}{" "}
                           more per press.
@@ -567,10 +574,10 @@ export default function SettingsPage() {
               />
               <div>
                 <Label className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                  Markets to pull
+                  Markets to pull · {billsPerRequest ? "PropLine" : "The Odds API"}
                 </Label>
                 <Input
-                  value={s.daily.markets?.join(", ") ?? ""}
+                  value={typedMarkets?.join(", ") ?? ""}
                   placeholder={dailyMarkets.join(", ")}
                   onChange={(e) => {
                     const parsed = e.target.value.split(",").map((x) => x.trim()).filter(Boolean)
@@ -579,7 +586,18 @@ export default function SettingsPage() {
                       // Empty means "follow the league", which is the right
                       // default: each league posts different markets, and a
                       // market that comes back empty buys nothing.
-                      daily: { ...p.daily, markets: parsed.length > 0 ? parsed : null },
+                      daily: {
+                        ...p.daily,
+                        // Only this feed's slot. The other feed keeps whatever
+                        // was typed for it, because a budget that matters on
+                        // The Odds API buys nothing on PropLine and the two
+                        // should not overwrite each other.
+                        markets: withMarketsFor(
+                          p.daily.markets,
+                          p.oddsFeed.provider,
+                          parsed.length > 0 ? parsed : null,
+                        ),
+                      },
                     }))
                   }}
                   className="mt-1.5 font-mono text-xs"
@@ -593,7 +611,16 @@ export default function SettingsPage() {
                           : ""
                       }`}{" "}
                   Markets from another sport are ignored for that league, so a basketball list is never billed on NFL
-                  games.
+                  games.{" "}
+                  <strong className="font-normal text-foreground">
+                    This list belongs to {billsPerRequest ? "PropLine" : "The Odds API"} only.
+                  </strong>{" "}
+                  Blank does not mean the same thing on both feeds — {dailyMarkets.length} market
+                  {dailyMarkets.length === 1 ? "" : "s"} here, the other feed&apos;s own there — so each keeps its
+                  own and switching feed never silently changes what a press costs.{" "}
+                  {otherFeedMarkets
+                    ? `${otherFeedLabel} is set to ${otherFeedMarkets.length} market${otherFeedMarkets.length === 1 ? "" : "s"}: ${otherFeedMarkets.join(", ")}.`
+                    : `${otherFeedLabel} is blank, so it pulls whatever its league posts.`}
                 </p>
                 {narrowingForFree.length > 0 ? (
                   <p className="mt-2 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-[11px] leading-relaxed text-destructive">
