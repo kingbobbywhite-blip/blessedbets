@@ -30,6 +30,12 @@ export default function SettingsPage() {
   // depends on which feed is selected.
   const billsPerRequest = s.oddsFeed.provider === "propline"
   const dailyMarkets = marketsForLeague(dailyLeague.id, s.daily.markets, { billsPerRequest })
+  // What a typed market list is costing on a feed that does not charge for
+  // width. Narrowing a per-market feed is a budget; narrowing a per-request
+  // one is a straight loss, and the board cannot say so in the abstract -- it
+  // has to name the markets that are being left on the table.
+  const freeBoard = dailyLeague.deepMarkets ?? dailyLeague.markets
+  const narrowingForFree = billsPerRequest ? freeBoard.filter((m) => !dailyMarkets.includes(m)) : []
   const companions = companionsOf(dailyLeague.id)
   // What one press of the selected league's button would spend, companions
   // included, billed per market per game at each competition's own list.
@@ -568,6 +574,16 @@ export default function SettingsPage() {
                   Markets from another sport are ignored for that league, so a basketball list is never billed on NFL
                   games.
                 </p>
+                {narrowingForFree.length > 0 ? (
+                  <p className="mt-2 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-[11px] leading-relaxed text-destructive">
+                    This list is costing you {narrowingForFree.length} market
+                    {narrowingForFree.length === 1 ? "" : "s"} for nothing. PropLine bills one request per game
+                    whatever you ask for, so {narrowingForFree.join(", ")} would come back in the same{" "}
+                    {s.daily.maxGames + 1} requests you are already spending. Every one left out is a pick&apos;em
+                    line that cannot be read, and an entry is only ever built at a line an app is really posting — so
+                    a market nobody asked for is a leg you cannot play. Clear the box to pull the whole board.
+                  </p>
+                ) : null}
               </div>
             </div>
 
