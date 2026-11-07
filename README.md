@@ -533,6 +533,14 @@ PropLine at 14 is moved to 15 on load, for the same reason.
 The rest of the NBA board, free on PropLine and addable under Settings → Markets on The Odds API:
 pts+reb, pts+ast, reb+ast, steals, blocks, steals+blocks.
 
+**The market list is stored per feed**, because blank does not mean the same thing on both. Blank
+on The Odds API is the five-market league default; blank on PropLine is the whole eleven-market
+board. One shared box therefore held a number that was a saving on one feed and a pure loss on the
+other, and switching feed changed what a press cost without saying so — a four-market list left
+blank took a 14-game press from 56 credits to 70, which is under the share that makes the button
+ask. Each feed now keeps its own list, the Settings box names which feed it is editing and what the
+other holds, and a list typed before this change stays on the feed it was typed for.
+
 **What belongs on that list is decided by the sportsbooks, not by the pick'em apps.** A pick'em
 line with no book behind it cannot be priced, cannot become a target, and tells you nothing you
 did not already know — so asking for it produces lines that are unusable by construction.

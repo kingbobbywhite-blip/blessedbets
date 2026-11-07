@@ -21,9 +21,11 @@ import { PICKEM_MAX_PROB } from "@/lib/today/build"
 
 /**
  * 2 moved the default feed to PropLine and stopped a stored market list
- * narrowing a feed that does not charge for width. See migrate().
+ * narrowing a feed that does not charge for width. 3 gave the market list a
+ * slot per feed, because blank costs nothing on one and five markets a game
+ * on the other. See migrate().
  */
-export const STATE_VERSION = 2
+export const STATE_VERSION = 3
 
 export interface BankrollSettings {
   bankroll: number
@@ -204,14 +206,51 @@ export interface DailySettings {
    */
   underMargin: Partial<Record<LeagueId, number>>
   /**
-   * Feed market keys to request. Fewer markets means fewer credits.
+   * Feed market keys to request, PER FEED.
    *
-   * Null means "use whatever this league posts", which is almost always the
+   * Blank means "use whatever this league posts", which is almost always the
    * right answer: basketball and the NFL post entirely different markets, and
    * asking for one a league never posts buys nothing and may cost a credit.
    * Entries from the wrong sport for a league are ignored.
+   *
+   * Per feed because blank does not mean the same thing on both, and one
+   * shared box made that difference invisible. On The Odds API, billed per
+   * market per game, a list is a credit budget and blank is the five-market
+   * league default. On PropLine, billed per request, width is free and blank
+   * is the whole eleven-market board. So one box held a number that was a
+   * saving on one feed and a pure loss on the other, and switching feed
+   * silently changed what it cost: a four-market list left blank went from
+   * eleven free markets to a 70-credit press where four markets had been 56.
+   * A list now belongs to the feed it was typed for and the other feed keeps
+   * its own.
    */
-  markets: string[] | null
+  markets: MarketListByFeed
+}
+
+/**
+ * A market list per feed, blank where none was typed.
+ *
+ * A missing key and an explicit null both mean "that feed uses the league's
+ * own list", so a reader never has to tell the two apart.
+ */
+export type MarketListByFeed = Partial<Record<OddsProvider, string[] | null>>
+
+/** The market list typed for a feed, or null to follow the league's own. */
+export function marketsFor(daily: Pick<DailySettings, "markets">, provider: OddsProvider): string[] | null {
+  const list = daily.markets?.[provider]
+  return list && list.length > 0 ? list : null
+}
+
+/** The same list with one feed's entry replaced. */
+export function withMarketsFor(
+  current: MarketListByFeed,
+  provider: OddsProvider,
+  list: string[] | null,
+): MarketListByFeed {
+  const next = { ...current }
+  if (list && list.length > 0) next[provider] = list
+  else delete next[provider]
+  return next
 }
 
 /**
@@ -251,7 +290,7 @@ export const DEFAULT_DAILY: DailySettings = {
   maxGames: maxGamesFor(LEAGUES[DEFAULT_LEAGUE], {
     billsPerRequest: DEFAULT_ODDS_FEED.provider === "propline",
   }),
-  markets: null,
+  markets: {},
   companions: false,
   pickemMaxProb: PICKEM_MAX_PROB,
   underMargin: { nba: NBA_UNDER_MARGIN },
@@ -640,7 +679,7 @@ export function migrate(raw: unknown): AppState {
         maxGames: reseedGameCap(leagueFor(dailyLeague), storedCap, {
           billsPerRequest: oddsFeed.provider === "propline",
         }),
-        markets: migrateMarketList(s.daily?.markets ?? null, s.oddsFeed?.provider, storedVersion),
+        markets: migrateMarketLists(s.daily?.markets, s.oddsFeed?.provider, storedVersion),
         underMargin: cleanMargins(s.daily?.underMargin),
       },
       oddsFeed,
@@ -712,46 +751,71 @@ function migrateToProplineDefault(feed: OddsFeedSettings, storedVersion: number)
 }
 
 /**
- * Clear a stored market list that is costing markets for nothing.
+ * Bring a market list forward into a slot per feed.
  *
- * A list is a budget on a feed billed per market per game, and someone who
- * narrowed The Odds API to stay under their quota meant it -- that list
- * survives. On PropLine the same list buys nothing: width is free, one request
- * per game whatever is asked for, so a four-market list holds the NBA to four
- * of eleven and every market left out is a pick'em line that cannot be read.
- * Since an entry is built only at lines an app is really posting, those are
- * legs that cannot be played.
+ * A legacy list is one flat array that applied to whichever feed happened to
+ * be selected, so the only honest thing to do with it is file it under the
+ * feed it was typed for and leave the other blank. That alone removes the bug
+ * this replaces: the previous version had to DECIDE whether to clear the list,
+ * got the decision wrong by reading the provider after the upgrade had already
+ * moved it, and so cleared a credit budget -- which on The Odds API is not a
+ * saving but a rise, from a four-market press at 56 credits to a blank-box
+ * five-market press at 70. With a slot per feed there is no decision: the
+ * budget stays on the feed that bills for it, and the other feed starts blank,
+ * which is what each one wants.
  *
- * So this clears a list once, for a blob written before STATE_VERSION 2, and
- * only when the install is on a per-request feed and the list is narrower than
- * that feed's free board. A list that already covers the board is not
- * narrowing anything and is left as it is.
+ * The one list still cleared is a legacy list typed ON PropLine that narrows
+ * the free board, because width is free there and every market left out is a
+ * pick'em line that cannot be read. That cannot raise a bill: PropLine bills
+ * per request whatever is asked for.
+ *
+ * Runs once, for a blob written before STATE_VERSION 3. A blob already holding
+ * a per-feed object is cleaned and passed through.
  */
-function migrateMarketList(
-  stored: string[] | null,
+function migrateMarketLists(
+  stored: unknown,
   storedProvider: OddsProvider | undefined,
   storedVersion: number,
-): string[] | null {
-  // Judged against the feed the install ACTUALLY HAD, never the one the
-  // upgrade just moved it to. Those differ for exactly the installs this
-  // matters most for: one sitting on The Odds API with a PropLine key is
-  // moved to PropLine above, and reading the moved provider here would then
-  // clear a list that was a credit budget on the feed it was typed for. Switch
-  // back and a blank box is the five-market league default, so a 14-game press
-  // goes from 56 credits to 70 -- a bill raised by a migration, silently,
-  // because 70 is just under the share that makes the button ask. The warning
-  // in Settings is how a narrowing list gets dealt with on PropLine; a
-  // migration must not spend money to do it.
-  if (storedVersion >= 2 || stored == null || storedProvider !== "propline") return stored
-  // Narrower than what a blank box would have pulled, on any league it could
-  // apply to: a basketball list narrows the NBA, a football list the NFL.
-  const narrows = LEAGUE_IDS.some((id) => {
+): MarketListByFeed {
+  const keys = (v: unknown): string[] | null => {
+    if (!Array.isArray(v)) return null
+    const out = v.filter((m): m is string => typeof m === "string" && m.length > 0)
+    return out.length > 0 ? out : null
+  }
+
+  // Already per-feed: keep each feed's own list.
+  if (stored && typeof stored === "object" && !Array.isArray(stored)) {
+    const out: MarketListByFeed = {}
+    for (const provider of ODDS_PROVIDERS) {
+      const list = keys((stored as Record<string, unknown>)[provider])
+      if (list) out[provider] = list
+    }
+    return out
+  }
+
+  const legacy = keys(stored)
+  if (legacy == null || storedVersion >= 3) return {}
+
+  // The feed it was typed for. An install that never named one was on
+  // whichever feed its keys selected, which is what providerForKeys decides
+  // for the feed itself, so the list follows the same answer.
+  const feed = storedProvider != null && ODDS_PROVIDERS.includes(storedProvider) ? storedProvider : "theoddsapi"
+  if (feed === "propline" && narrowsFreeBoard(legacy)) return {}
+  return { [feed]: legacy }
+}
+
+/**
+ * Is this list narrower than what a blank box would pull on a per-request
+ * feed, for any league it could apply to? A basketball list is judged against
+ * the NBA's free board, a football list against the NFL's.
+ */
+function narrowsFreeBoard(list: string[]): boolean {
+  return LEAGUE_IDS.some((id) => {
     const league = LEAGUES[id]
     const free = league.deepMarkets ?? league.markets
-    const applies = stored.some((m) => free.includes(m))
-    return applies && free.some((m) => !stored.includes(m))
+    const applies = list.some((m) => free.includes(m))
+    return applies && free.some((m) => !list.includes(m))
   })
-  return narrows ? null : stored
 }
 
 /**
