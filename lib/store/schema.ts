@@ -465,6 +465,14 @@ export interface LineSnapshot {
   pulledAt: string
   league: LeagueId
   rows: LineSnapshotRow[]
+  /**
+   * Rows the storage cap dropped from this pull, when it dropped any.
+   *
+   * Absent on a snapshot that fitted, which is the ordinary case. Kept
+   * because a pair count that looks thin has two causes and only one of them
+   * is "pull again on game day".
+   */
+  truncated?: number
 }
 
 /**
@@ -483,8 +491,69 @@ export interface LineSnapshot {
  */
 export const MAX_LINE_SNAPSHOTS = 8
 
-/** Rows kept per snapshot, newest-priced first. A full NFL pull is about 1,100. */
+/**
+ * Rows kept per snapshot. A full NFL pull is about 1,100, so the NFL fits
+ * whole; a 15-game NBA night across eleven markets does not, and the rows
+ * that go are chosen by rankSnapshotRows rather than by arrival order -- see
+ * there for why the choice decides whether the history is worth keeping at
+ * all. This is the backstop for a slate far bigger than the NFL's.
+ */
 export const MAX_SNAPSHOT_ROWS = 1500
+
+/**
+ * A stable 32-bit hash (FNV-1a) of a prop's identity.
+ *
+ * Stable is the whole requirement: the same prop must sort to the same place
+ * in a pull taken on Tuesday and a pull taken on Saturday, with no state
+ * carried between them.
+ */
+function stableHash(text: string): number {
+  let h = 0x811c9dc5
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i)
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  return h >>> 0
+}
+
+/**
+ * How deep a row's market is, in tiers coarse enough to be stable.
+ *
+ * A prop's exact book count moves from night to night; whether it has a real
+ * consensus, a thin one, or a single book does not. Tiers rather than the raw
+ * number keep the kept set from churning on noise.
+ */
+function depthTier(books: number): number {
+  if (books >= 4) return 0
+  if (books >= 2) return 1
+  return 2
+}
+
+/**
+ * Which rows to keep when a slate carries more props than storage allows.
+ *
+ * Truncation is not a detail here, it is the entire value of the history. A
+ * pair needs the SAME prop to survive in TWO snapshots, so dropping rows in
+ * whatever order the quotes happened to arrive loses pairs far faster than it
+ * loses rows: two snapshots that each keep a different 60% of a slate share
+ * only about 36% of it, and the fit is built on what they share. Slicing an
+ * unordered list is therefore close to the worst available policy, and it is
+ * what this did.
+ *
+ * So the order is stable across pulls and independent of how big the slate
+ * was. Depth first, in tiers a prop does not cross on noise, because a line
+ * only one book posts says little about the market revising its own opinion.
+ * Within a tier a hash of the prop's own identity decides: arbitrary, but
+ * identical in every pull, so a midweek look and a game-day look keep the
+ * same props and actually pair.
+ */
+export function rankSnapshotRows(rows: LineSnapshotRow[]): LineSnapshotRow[] {
+  return [...rows].sort((a, b) => {
+    const tier = depthTier(a.books) - depthTier(b.books)
+    if (tier !== 0) return tier
+    return stableHash(`${a.key}|${a.market}`) - stableHash(`${b.key}|${b.market}`)
+  })
+}
 
 export interface AppState {
   version: number
@@ -644,7 +713,15 @@ function migrateLines(raw: unknown): LineSnapshot[] {
         Array.isArray(snap.rows)
       )
     })
-    .map((snap) => ({ ...snap, rows: snap.rows.filter(isLineSnapshotRow).slice(0, MAX_SNAPSHOT_ROWS) }))
+    .map((snap) => {
+      const rows = snap.rows.filter(isLineSnapshotRow)
+      const kept = rankSnapshotRows(rows).slice(0, MAX_SNAPSHOT_ROWS)
+      // A snapshot written before the cap, or by an older build that sliced in
+      // arrival order, is re-chosen by the same stable ranking as a fresh one,
+      // so an upgraded install's old pulls still pair with its new ones.
+      const dropped = (snap.truncated ?? 0) + (rows.length - kept.length)
+      return { ...snap, rows: kept, ...(dropped > 0 ? { truncated: dropped } : {}) }
+    })
     .sort((a, b) => b.pulledAt.localeCompare(a.pulledAt))
     .slice(0, MAX_LINE_SNAPSHOTS)
 }
