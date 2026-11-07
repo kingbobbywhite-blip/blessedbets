@@ -11,6 +11,7 @@ import {
   LEAGUE_IDS,
   isLeagueId,
   leagueFor,
+  maxGamesFor,
   reseedGameCap,
   type LeagueId,
   type LoggedLeagueId,
@@ -239,11 +240,17 @@ export const DEFAULT_DAILY: DailySettings = {
   minEdge: 0.02,
   requireSharpReference: true,
   parlayLegs: 3,
-  // The per-market cap, because DEFAULT_ODDS_FEED is The Odds API and these
-  // defaults are one static object that cannot see the feed. Selecting
-  // PropLine reseeds it, and migrate() lifts an install that predates the
-  // split, both via reseedGameCap.
-  maxGames: LEAGUES[DEFAULT_LEAGUE].maxGames,
+  // Sized to the feed these defaults also ship, not to one of the two caps
+  // picked by hand: the NBA keeps a per-market cap and a per-request one, and
+  // a fresh install that shipped PropLine with the credit cap would leave the
+  // last game of a 15-game night unpulled to save credits PropLine does not
+  // charge -- the exact mismatch the split exists to remove. Changing either
+  // default alone therefore cannot desync them. Selecting the other feed
+  // reseeds this, and migrate() lifts an install that predates the split,
+  // both via reseedGameCap.
+  maxGames: maxGamesFor(LEAGUES[DEFAULT_LEAGUE], {
+    billsPerRequest: DEFAULT_ODDS_FEED.provider === "propline",
+  }),
   markets: null,
   companions: false,
   pickemMaxProb: PICKEM_MAX_PROB,

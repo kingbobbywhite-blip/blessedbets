@@ -74,6 +74,7 @@ describe("bettable books", () => {
 })
 
 import { DEFAULT_ODDS_FEED, migrate } from "@/lib/store/schema"
+import { LEAGUES, maxGamesFor } from "@/lib/leagues"
 
 describe("the books in the rotation", () => {
   it("recommends bets at FanDuel only by default; the sharp books stay references", () => {
@@ -132,6 +133,25 @@ describe("PropLine settings", () => {
       migrate({ settings: { oddsFeed: { provider: "theoddsapi", apiKey: "abc" } }, version: 2 }).settings.oddsFeed
         .provider,
     ).toBe("theoddsapi")
+  })
+
+  it("ships a game cap that matches the feed it ships", () => {
+    // The two defaults are set in different places and nothing but this test
+    // ties them together. A fresh install on PropLine with the credit cap
+    // would leave the last game of a 15-game night unpulled to save credits
+    // PropLine does not charge, which is the mismatch the split removes --
+    // and no other test would notice, because each default is valid alone.
+    expect(DEFAULT_SETTINGS.daily.maxGames).toBe(
+      maxGamesFor(LEAGUES[DEFAULT_SETTINGS.daily.league], {
+        billsPerRequest: DEFAULT_ODDS_FEED.provider === "propline",
+      }),
+    )
+    // Stated concretely too, so a change to either default has to come here
+    // and say what it meant rather than quietly tracking a formula.
+    expect(DEFAULT_ODDS_FEED.provider).toBe("propline")
+    expect(DEFAULT_SETTINGS.daily.maxGames).toBe(15)
+    // And a blank market list, so the per-request board is pulled whole.
+    expect(DEFAULT_SETTINGS.daily.markets).toBeNull()
   })
 
   it("moves an install that never chose a feed onto PropLine, once, and only with a key", () => {
