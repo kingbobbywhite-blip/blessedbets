@@ -640,7 +640,7 @@ export function migrate(raw: unknown): AppState {
         maxGames: reseedGameCap(leagueFor(dailyLeague), storedCap, {
           billsPerRequest: oddsFeed.provider === "propline",
         }),
-        markets: migrateMarketList(s.daily?.markets ?? null, oddsFeed.provider, storedVersion),
+        markets: migrateMarketList(s.daily?.markets ?? null, s.oddsFeed?.provider, storedVersion),
         underMargin: cleanMargins(s.daily?.underMargin),
       },
       oddsFeed,
@@ -729,10 +729,20 @@ function migrateToProplineDefault(feed: OddsFeedSettings, storedVersion: number)
  */
 function migrateMarketList(
   stored: string[] | null,
-  provider: OddsProvider,
+  storedProvider: OddsProvider | undefined,
   storedVersion: number,
 ): string[] | null {
-  if (storedVersion >= 2 || stored == null || provider !== "propline") return stored
+  // Judged against the feed the install ACTUALLY HAD, never the one the
+  // upgrade just moved it to. Those differ for exactly the installs this
+  // matters most for: one sitting on The Odds API with a PropLine key is
+  // moved to PropLine above, and reading the moved provider here would then
+  // clear a list that was a credit budget on the feed it was typed for. Switch
+  // back and a blank box is the five-market league default, so a 14-game press
+  // goes from 56 credits to 70 -- a bill raised by a migration, silently,
+  // because 70 is just under the share that makes the button ask. The warning
+  // in Settings is how a narrowing list gets dealt with on PropLine; a
+  // migration must not spend money to do it.
+  if (storedVersion >= 2 || stored == null || storedProvider !== "propline") return stored
   // Narrower than what a blank box would have pulled, on any league it could
   // apply to: a basketball list narrows the NBA, a football list the NFL.
   const narrows = LEAGUE_IDS.some((id) => {

@@ -176,7 +176,8 @@ describe("PropLine settings", () => {
   })
 
   it("clears a stored market list that was narrowing a per-request feed, once", () => {
-    // Four NBA markets on PropLine is four of eleven for the same requests.
+    // Four NBA markets on PropLine is four of eleven for the same requests,
+    // and on a feed that bills per request it was never a budget, so it goes.
     const narrowed = migrate({
       settings: {
         oddsFeed: { provider: "propline", proplineKey: "pk" },
@@ -193,6 +194,21 @@ describe("PropLine settings", () => {
       },
     })
     expect(budget.settings.daily.markets).toEqual(["player_points", "player_rebounds"])
+
+    // And it is STILL a budget when the same upgrade moves that install to
+    // PropLine, which is the case the first version of this got wrong: the
+    // list is judged against the feed it was typed for, not the one the move
+    // lands on. Clearing it here raises the bill on the feed they came from --
+    // blank is the five-market default there, so a 14-game press goes 56 -> 70
+    // credits, under the 15% that makes the button ask, so silently.
+    const moved = migrate({
+      settings: {
+        oddsFeed: { provider: "theoddsapi", apiKey: "abc", proplineKey: "pk" },
+        daily: { league: "nba", maxGames: 14, markets: ["player_points", "player_rebounds"] },
+      },
+    })
+    expect(moved.settings.oddsFeed.provider).toBe("propline")
+    expect(moved.settings.daily.markets).toEqual(["player_points", "player_rebounds"])
 
     // Already upgraded: a list typed after the change is a choice and stays.
     const after = migrate({
