@@ -488,9 +488,31 @@ export default function TodayPage() {
       })
       const data = await res.json()
       if (!res.ok) {
+        // An upgrade moved this install to PropLine on a key it could not
+        // check, and PropLine has now refused it. Undo the app's own guess
+        // rather than leave a working Odds API setup pulling nothing: the
+        // provider goes back, the flag is spent, and the message says what
+        // happened so it does not read as the feed being down. Only ever a
+        // move the app made -- see autoMovedToPropline.
+        if (data.needsKey && usePropline && s.oddsFeed.autoMovedToPropline) {
+          setSettings((p) => ({
+            ...p,
+            oddsFeed: { ...p.oddsFeed, provider: "theoddsapi", autoMovedToPropline: false },
+          }))
+          setNeedsKey(false)
+          setError(
+            `${data.error ?? "PropLine would not serve this pull."} This install was moved to PropLine automatically because a PropLine key was stored, and PropLine has refused it, so the feed has been put back to The Odds API. Fix or replace the PropLine key under Settings to use it, or carry on where you were.`,
+          )
+          return
+        }
         setNeedsKey(!!data.needsKey)
         setError(data.error ?? `Request failed (${res.status}).`)
         return
+      }
+      // PropLine served a pull, so the move it was flagged for was right and
+      // the flag has nothing left to undo.
+      if (usePropline && s.oddsFeed.autoMovedToPropline) {
+        setSettings((p) => ({ ...p, oddsFeed: { ...p.oddsFeed, autoMovedToPropline: false } }))
       }
       setDaily({
         league: leagueId,

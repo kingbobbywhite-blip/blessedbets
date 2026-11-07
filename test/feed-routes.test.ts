@@ -786,6 +786,31 @@ describe("a PropLine key the feed rejects", () => {
     })
   }
 
+  it("offers the other feed when a refused PropLine key stopped the whole slate", async () => {
+    // PropLine PRICING the slate and refusing the key means nothing was
+    // pulled, which the key's own sentence cannot say: it is written for the
+    // pick'em-lines call too, where the slate survives. And the offer is only
+    // made when there is an Odds API key to go back to.
+    vi.stubEnv("PROPLINE_API_KEY", "")
+    vi.stubEnv("ODDS_API_KEY", "")
+    stubRejecting()
+    const withKey = (await (
+      await today({ provider: "propline", proplineKey: "wrong-key", apiKey: "odds-key", league: "nba" })
+    ).json()) as { error: string }
+    expect(withKey.error).toContain("PropLine is pricing the slate, so nothing was pulled.")
+    expect(withKey.error).toContain("Switch the provider back to The Odds API")
+
+    // apiKey must be cleared explicitly: the helper above injects one into
+    // every body, so omitting it is not the same as not having one.
+    stubRejecting()
+    const withoutKey = (await (
+      await today({ provider: "propline", proplineKey: "wrong-key", apiKey: "", league: "nba" })
+    ).json()) as { error: string }
+    expect(withoutKey.error).toContain("PropLine is pricing the slate, so nothing was pulled.")
+    // No Odds API key, so no advice that leads nowhere.
+    expect(withoutKey.error).not.toContain("Switch the provider back")
+  })
+
   it("names the environment when that is where the rejected key came from", async () => {
     vi.stubEnv("PROPLINE_API_KEY", "stale-env-key")
     const sent = stubRejecting()

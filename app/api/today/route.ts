@@ -195,6 +195,7 @@ export async function POST(request: Request) {
     return fromPropline({
       apiKey: proplineKey!,
       keySource: proplineKeySource,
+      oddsApiKeyAvailable: apiKey != null,
       leagueId,
       markets: body.markets ?? null,
       maxGames,
@@ -630,6 +631,11 @@ interface PullArgs {
   apiKey: string
   /** Where the PropLine key came from, so a rejected key says where to correct it. */
   keySource?: ResolvedKey | null
+  /**
+   * Whether an Odds API key is available, so a refused PropLine key can offer
+   * the other feed instead of advice that leads nowhere.
+   */
+  oddsApiKeyAvailable?: boolean
   leagueId: LeagueId
   /** The market list from Settings, or null to follow each competition's own. */
   markets: string[] | null
@@ -772,8 +778,29 @@ async function fromPropline(args: PullArgs & { eventsOnly: boolean }) {
     // Settings instead of inviting a retry that will fail the same way. The
     // status stays 502: it was this server's credential PropLine refused, not
     // the caller's, so a 401 would say the wrong party is unauthenticated.
+    // Where PropLine is PRICING the slate, a refused key means nothing was
+    // pulled at all, and the message that describes the key cannot know that:
+    // it is written for the pick'em-lines call too, where the slate survives.
+    // So the route, which does know, names the way out -- and only when there
+    // is an Odds API key to go back to, since otherwise it is advice that
+    // leads nowhere.
+    const keyRefused = err instanceof FeedKeyError
+    const canFallBack = keyRefused && !!args.oddsApiKeyAvailable
     return NextResponse.json(
-      { error: feedErrorText(err, "PropLine"), needsKey: err instanceof FeedKeyError },
+      {
+        error: [
+          feedErrorText(err, "PropLine"),
+          keyRefused
+            ? "PropLine is pricing the slate, so nothing was pulled."
+            : null,
+          canFallBack
+            ? "Switch the provider back to The Odds API under Settings to price this slate with your Odds API key instead."
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" "),
+        needsKey: keyRefused,
+      },
       { status: 502 },
     )
   }

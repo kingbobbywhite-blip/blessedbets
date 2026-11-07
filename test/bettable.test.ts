@@ -178,6 +178,40 @@ describe("PropLine settings", () => {
     expect(again.settings.oddsFeed.provider).toBe("theoddsapi")
   })
 
+  it("flags a move the app made, so a refused key can undo it", () => {
+    // The move is guarded on a stored PropLine key, and a key being present
+    // is not the same as PropLine accepting it -- nothing offline can tell
+    // those apart. So the move is marked, and the Today screen puts the
+    // provider back when PropLine refuses the key. Only the app's own guess
+    // is ever undone.
+    const moved = migrate({
+      settings: { oddsFeed: { provider: "theoddsapi", apiKey: "abc", proplineKey: "pk" } },
+    })
+    expect(moved.settings.oddsFeed.provider).toBe("propline")
+    expect(moved.settings.oddsFeed.autoMovedToPropline).toBe(true)
+
+    // A provider nobody moved carries no flag, so nothing can undo it.
+    const chosen = migrate({
+      settings: { oddsFeed: { provider: "propline", proplineKey: "pk" } },
+    })
+    expect(chosen.settings.oddsFeed.provider).toBe("propline")
+    expect(chosen.settings.oddsFeed.autoMovedToPropline).toBeFalsy()
+
+    // Nor does an install left where it was for want of a PropLine key.
+    const stayed = migrate({ settings: { oddsFeed: { provider: "theoddsapi", apiKey: "abc" } } })
+    expect(stayed.settings.oddsFeed.provider).toBe("theoddsapi")
+    expect(stayed.settings.oddsFeed.autoMovedToPropline).toBeFalsy()
+
+    // And once spent it stays spent, so a later refusal is the user's to fix.
+    const spent = migrate({
+      version: 3,
+      settings: {
+        oddsFeed: { provider: "propline", apiKey: "abc", proplineKey: "pk", autoMovedToPropline: false },
+      },
+    })
+    expect(spent.settings.oddsFeed.autoMovedToPropline).toBe(false)
+  })
+
   it("files a legacy market list under the feed it was typed for", () => {
     const LIST = ["player_points", "player_rebounds"]
 
