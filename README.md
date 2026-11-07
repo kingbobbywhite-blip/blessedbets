@@ -251,6 +251,12 @@ Player props are billed **per market per game**. Four markets across a twelve-ga
 48 credits for one refresh, so the free tier is about ten refreshes a month. Narrow the
 market list rather than the book list: books are free, markets are not.
 
+Narrow the market list rather than the game cap, too. Games are the other factor of the bill, but
+cutting them is not free in the way it looks: outside the depth-ranked college slate the cap takes
+games in **start order**, so a lower cap drops the latest tip rather than the thinnest market. On
+PropLine, which bills per request, a game costs one request of 1,000 a day and the cap should just
+be the whole slate.
+
 | Column (for pasted data) | Matters |
 | --- | --- |
 | `player`, `market`, `line` | Required. The line is the number your app is offering. |
@@ -476,17 +482,33 @@ imported board — and slips are never shed: they are the only record of what th
 | Feed sport key | `basketball_nba` | `americanfootball_nfl` | `americanfootball_ncaaf` |
 | Markets, per-market feed | pts, reb, ast, 3pm, pra | pass yds, rush yds, rec yds, receptions | same as the NFL |
 | Markets, per-request feed | the whole board: 11 | same four | same as the NFL |
-| Default game cap | 14 | 14 | 6 |
+| Default game cap, per-market feed | 14 | 14 | 6 |
+| Default game cap, per-request feed | 15 | 14 | 6 |
 | Volatility prior | baseline | its own markets | +20% on the NFL's (unfitted) |
 | One default press | 70 credits | 56 credits | +24, and +1 to rank them |
 
-**How wide a press asks is a question about billing.** The Odds API charges markets × games, so
-its market list is a budget: the NBA's five put a full 14-game night at 70 credits, 14% of a
-500-request month, which is under the share that makes the button stop and ask. PropLine charges
-one request per game whatever the list, so the same budget buys nothing there — on PropLine the
-NBA pulls its whole board, eleven markets for the price of four. Every market left out is a
-pick'em line that could have been read and was not, and since an entry is built only at lines an
-app is really posting, a market nobody asked for is a leg you cannot play.
+**How wide a press asks is a question about billing, and so is how many games.** The Odds API
+charges markets × games, so both are a budget: the NBA's five markets put a full 14-game night at
+70 credits, 14% of a 500-request month, which is under the share that makes the button stop and
+ask. PropLine charges one request per game whatever the list, so the same budget buys nothing
+there — on PropLine the NBA pulls its whole board, eleven markets for the price of four, across
+all 15 games for 16 requests of the 1,000 a day. Every market left out is a pick'em line that
+could have been read and was not, and since an entry is built only at lines an app is really
+posting, a market nobody asked for is a leg you cannot play.
+
+**The game cap splits the same way, for the same reason.** 30 teams means 15 games is the biggest
+night the NBA can have, and on PropLine that is 1.6% of a day — so the cap there is the whole
+slate. On The Odds API the fifteenth game costs a whole market list: 15 × 5 is 75 credits, exactly
+the 15% of a month that makes the button ask, and a default press that asks every single time
+teaches you to click through the one gate protecting the quota. So the NBA carries two defaults,
+14 and 15, and the feed picks. **This matters because the cap is not a quality filter.** Only a
+depth-ranked competition chooses which games to spend it on; everyone else takes them in start
+order, so a cap below the slate drops the latest game rather than the worst one — on a 15-game
+night, the late West Coast tip, every time.
+
+Changing feed moves the cap with it when the stored cap was only the other feed's default, and
+leaves it alone when it is a number you chose. An install from before the split that sits on
+PropLine at 14 is moved to 15 on load, for the same reason.
 
 The rest of the NBA board, free on PropLine and addable under Settings → Markets on The Odds API:
 pts+reb, pts+ast, reb+ast, steals, blocks, steals+blocks.
@@ -545,6 +567,9 @@ presses from an empty month — the pull is a confirm rather than a note beside 
 note is read after the credits are gone. The figure is summed per competition, since each can be
 asked for a different market list and credits are billed per market per game. A full Sunday with
 college football switched on is 80 credits, so that press asks; the NFL alone, at 56, does not.
+Neither does a full NBA night at its per-market cap, at 70 — which is why that cap is 14 and not
+the 15 PropLine pulls: the fifteenth game would put the default press at exactly 75 and make the
+gate fire on every single press, which is how a gate stops being read.
 
 **Yardage carries a floor on its relative spread.** A ratio prior implies that the spread
 grows with the square root of the projection, so a 340-yard passing line came out with a

@@ -57,6 +57,7 @@ import {
   creditPlan,
   inSeason,
   leagueFor,
+  maxGamesFor,
   pullPlan,
   type LeagueId,
 } from "@/lib/leagues"
@@ -172,7 +173,7 @@ export default function TodayPage() {
       // meant a raised cap was never priced and the gate never opened: 20 NBA
       // games at five markets is 100 credits shown as 70. The market list
       // depends on the feed too, since width is free on a per-request one.
-      pullPlan(leagueId, requestedMaxGames, { companions: wantCompanions }).reduce(
+      pullPlan(leagueId, requestedMaxGames, { companions: wantCompanions, billsPerRequest: usePropline }).reduce(
         (a, p) =>
           a +
           p.games * marketsForCompetition(p.league, s.daily.markets, { billsPerRequest: usePropline }).length +
@@ -194,8 +195,14 @@ export default function TodayPage() {
     setSettings((prev) => ({
       ...prev,
       // The game cap travels with the league: an NFL cap on an NBA slate
-      // misses part of it, and each league's cap is sized to its own slate.
-      daily: { ...prev.daily, league: next, maxGames: LEAGUES[next].maxGames },
+      // misses part of it, and each league's cap is sized to its own slate --
+      // and to how the feed bills, since a game is a market list on The Odds
+      // API and one request on PropLine.
+      daily: {
+        ...prev.daily,
+        league: next,
+        maxGames: maxGamesFor(LEAGUES[next], { billsPerRequest: usePropline }),
+      },
     }))
     setError(null)
     setNeedsKey(false)

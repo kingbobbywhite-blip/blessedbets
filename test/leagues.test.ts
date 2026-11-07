@@ -18,6 +18,9 @@ import {
   LOGGED_LEAGUE_IDS,
   leagueFor,
   loggedLeagueLabel,
+  maxGamesFor,
+  maxGamesForLeague,
+  reseedGameCap,
   scaleMean,
   sportKeyFor,
   sportOfLoggedLeague,
@@ -147,6 +150,61 @@ describe("league config", () => {
     const credits = LEAGUES.nba.maxGames * LEAGUES.nba.markets.length
     expect(creditWarning("nba", LEAGUES.nba.maxGames, LEAGUES.nba.markets.length).confirm).toBe(false)
     expect(credits / 500).toBeLessThan(CONFIRM_PCT_OF_QUOTA)
+  })
+
+  it("pulls the whole NBA slate on a per-request feed, and stays under the gate on a per-market one", () => {
+    // 30 teams, so 15 games is the largest night the NBA can have and the cap
+    // on a feed that charges by the request. The NBA is not depth-ranked, so a
+    // cap below the slate drops the LATEST game rather than the worst one: at
+    // 14 that is the late West Coast tip, every night it exists.
+    expect(maxGamesFor(LEAGUES.nba, { billsPerRequest: true })).toBe(15)
+    expect(maxGamesForLeague("nba", { billsPerRequest: true })).toBe(15)
+    // One request per game plus the events listing, against 1,000 a day.
+    expect(maxGamesFor(LEAGUES.nba, { billsPerRequest: true }) + 1).toBeLessThan(1000 * 0.02)
+
+    // And the reason it is not simply the one cap: the fifteenth game on The
+    // Odds API costs a whole market list. 15 x 5 is 75 credits, which is
+    // exactly the 15% of a month that makes the button ask.
+    expect(maxGamesFor(LEAGUES.nba)).toBe(14)
+    const wide = 15 * LEAGUES.nba.markets.length
+    expect(wide / 500).toBe(CONFIRM_PCT_OF_QUOTA)
+    expect(creditWarning("nba", 15, LEAGUES.nba.markets.length).confirm).toBe(true)
+  })
+
+  it("leaves a league with one cap alone on either feed", () => {
+    // deepMaxGames is optional, and a league that never drew the distinction
+    // must not read as undefined games on a per-request feed.
+    for (const id of LEAGUE_IDS) {
+      if (LEAGUES[id].deepMaxGames != null) continue
+      expect(maxGamesFor(LEAGUES[id], { billsPerRequest: true }), id).toBe(LEAGUES[id].maxGames)
+    }
+    expect(maxGamesFor(LEAGUES.nfl, { billsPerRequest: true })).toBe(LEAGUES.nfl.maxGames)
+    expect(maxGamesFor(LEAGUES.cfb, { billsPerRequest: true })).toBe(LEAGUES.cfb.maxGames)
+  })
+
+  it("counts a per-request pull at the per-request cap, companions included", () => {
+    // The preview beside the button has to agree with what the press will ask
+    // for, or the gate is computed on a slate nobody pulled.
+    expect(plannedGames("nba", maxGamesFor(LEAGUES.nba, { billsPerRequest: true }))).toBe(15)
+    expect(
+      pullPlan("nfl", LEAGUES.nfl.maxGames, { companions: true, billsPerRequest: true })
+        .find((p) => p.league.id === "cfb")!.games,
+    ).toBe(LEAGUES.cfb.maxGames)
+  })
+
+  it("moves a seeded game cap to the new feed and leaves a chosen one alone", () => {
+    const nba = LEAGUES.nba
+    // 14 is the credit default and was never a choice on PropLine, so it goes.
+    expect(reseedGameCap(nba, 14, { billsPerRequest: true })).toBe(15)
+    // 15 is the per-request default and is not a choice on The Odds API.
+    expect(reseedGameCap(nba, 15, { billsPerRequest: false })).toBe(14)
+    // Anything else somebody typed, and it survives both ways.
+    for (const chosen of [1, 5, 8, 20]) {
+      expect(reseedGameCap(nba, chosen, { billsPerRequest: true })).toBe(chosen)
+      expect(reseedGameCap(nba, chosen, { billsPerRequest: false })).toBe(chosen)
+    }
+    // A league with one cap has nothing to move, so every value is a choice.
+    expect(reseedGameCap(LEAGUES.nfl, LEAGUES.nfl.maxGames, { billsPerRequest: true })).toBe(LEAGUES.nfl.maxGames)
   })
 
   it("retires the NHL as a league Today prices, while keeping it loggable", () => {

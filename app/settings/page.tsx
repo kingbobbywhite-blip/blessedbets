@@ -15,7 +15,7 @@ import { DEVIG_METHODS, type DevigMethod } from "@/lib/quant/odds"
 import { payoutMultiple, payoutVerified, supportedPickCounts } from "@/lib/quant/payouts"
 import { exportState, importState } from "@/lib/store/local"
 import { useStore } from "@/lib/store/provider"
-import { companionsOf, creditPlan, leagueFor, pullPlan } from "@/lib/leagues"
+import { companionsOf, creditPlan, leagueFor, pullPlan, reseedGameCap } from "@/lib/leagues"
 import { marketsForCompetition, marketsForLeague } from "@/lib/odds-feed/theoddsapi"
 import { DEFAULT_SETTINGS, type OddsProvider } from "@/lib/store/schema"
 import { money } from "@/lib/format"
@@ -35,6 +35,7 @@ export default function SettingsPage() {
   // included, billed per market per game at each competition's own list.
   const dailyCredits = pullPlan(dailyLeague.id, Math.max(1, Math.min(s.daily.maxGames, 20)), {
     companions: s.daily.companions,
+    billsPerRequest,
   }).reduce(
     // Including the ranking call a depth-ranked companion buys, so this agrees
     // with the figure the Today screen gates on.
@@ -274,7 +275,23 @@ export default function SettingsPage() {
                       key={p.id}
                       type="button"
                       aria-pressed={on}
-                      onClick={() => setSettings((prev) => ({ ...prev, oddsFeed: { ...prev.oddsFeed, provider: p.id } }))}
+                      onClick={() =>
+                        setSettings((prev) => ({
+                          ...prev,
+                          oddsFeed: { ...prev.oddsFeed, provider: p.id },
+                          // The game cap follows the feed when it was only the
+                          // other feed's default, and stays put when it was
+                          // chosen. PropLine bills per request, so a cap sized
+                          // for The Odds API's credits would leave part of the
+                          // slate unpulled for no saving.
+                          daily: {
+                            ...prev.daily,
+                            maxGames: reseedGameCap(leagueFor(prev.daily.league), prev.daily.maxGames, {
+                              billsPerRequest: p.id === "propline",
+                            }),
+                          },
+                        }))
+                      }
                       className={
                         on
                           ? "rounded-md bg-primary/15 px-3 py-1.5 font-mono text-[11px] text-primary ring-1 ring-primary/30"

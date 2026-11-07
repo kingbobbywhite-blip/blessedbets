@@ -120,6 +120,25 @@ export interface LeagueConfig {
   books: string[]
   /** Default cap on games per pull, sized to the league's slate and the credit cost. */
   maxGames: number
+  /**
+   * The default game cap when the feed bills per REQUEST instead.
+   *
+   * Same split as `markets` / `deepMarkets`, and for the same reason. The Odds
+   * API charges markets x games, so the cap above is half of a credit budget:
+   * raising it raises the bill by a whole market list per game. PropLine
+   * charges one request per game, so a game costs a single request out of
+   * 1,000 a day and the budget buys nothing — the only sensible cap there is
+   * the whole slate.
+   *
+   * This matters more than it looks, because the cap is not a quality filter.
+   * Only a depth-ranked competition picks which games to spend it on; everyone
+   * else takes them in start order, so a cap below the slate size drops the
+   * latest game rather than the worst one. On a 15-game NBA night that is the
+   * late West Coast tip, every time.
+   *
+   * Omit where the league's own cap already covers its biggest slate.
+   */
+  deepMaxGames?: number
   /** Rough games on a busy in-season day, used for the quota warning. */
   typicalSlate: number
   /** Months (1-12) the league is normally in season, for the off-season notice. */
@@ -220,7 +239,14 @@ export const LEAGUES: Record<LeagueId, LeagueConfig> = {
     ],
     deepMarkets: NBA_DEEP_MARKETS,
     books: NBA_BOOKS,
+    // 30 teams, so 15 games is the largest night the NBA can have, and that is
+    // the cap on a per-request feed: 16 requests of PropLine's 1,000 a day.
+    // The Odds API cap stays at 14 because the fifteenth game there costs a
+    // whole market list — 15 x 5 is 75 credits, exactly the 15% of a month
+    // that makes the button ask, and a default press that asks every time
+    // trains you to click through the one gate that protects the quota.
     maxGames: 14,
+    deepMaxGames: 15,
     typicalSlate: 11,
     season: [10, 11, 12, 1, 2, 3, 4, 5, 6],
     // Ceilings on a plausible projected mean, not on a plausible game. They
@@ -432,16 +458,61 @@ export interface CompetitionPlan {
  * count by one market count overstates the cheap competition and understates
  * the expensive one.
  */
-export function pullPlan(id: LeagueId, primaryCap: number, opts: { companions?: boolean } = {}): CompetitionPlan[] {
+export function pullPlan(id: LeagueId, primaryCap: number, opts: PullBreadth = {}): CompetitionPlan[] {
   return competitionsFor(id, opts).map((league) => ({
     league,
-    games: league.id === id ? Math.max(0, primaryCap) : league.maxGames,
+    games: league.id === id ? Math.max(0, primaryCap) : maxGamesFor(league, opts),
   }))
 }
 
 /** Games one press would pull, across every competition in the plan. */
-export function plannedGames(id: LeagueId, primaryCap: number, opts: { companions?: boolean } = {}): number {
+export function plannedGames(id: LeagueId, primaryCap: number, opts: PullBreadth = {}): number {
   return pullPlan(id, primaryCap, opts).reduce((a, p) => a + p.games, 0)
+}
+
+/**
+ * How wide a press asks, which on both axes is a question about billing.
+ *
+ * `billsPerRequest` is the same flag the market list resolves against (see
+ * MarketBreadth in lib/odds-feed/theoddsapi), named the same way on purpose:
+ * games and markets are the two factors of The Odds API's bill and neither is
+ * a factor of PropLine's.
+ */
+export interface PullBreadth {
+  companions?: boolean
+  /** True for a feed billed per request rather than per market per game. */
+  billsPerRequest?: boolean
+}
+
+/**
+ * The default game cap for a competition on this feed.
+ *
+ * A league with no per-request cap of its own keeps the one cap it has, so
+ * this is safe to call for every competition rather than only the ones that
+ * drew the distinction.
+ */
+export function maxGamesFor(competition: LeagueConfig, opts: PullBreadth = {}): number {
+  return opts.billsPerRequest ? (competition.deepMaxGames ?? competition.maxGames) : competition.maxGames
+}
+
+/** The same, from a league id, falling back to the NBA rather than throwing. */
+export function maxGamesForLeague(id: unknown, opts: PullBreadth = {}): number {
+  return maxGamesFor(leagueFor(id), opts)
+}
+
+/**
+ * The cap to store for a league when the feed changes under it.
+ *
+ * A cap the user chose is theirs and travels unchanged -- someone who set five
+ * games meant five, and a feed switch is not permission to overrule them. A
+ * cap that is only the OTHER feed's default was never a choice, it is a seed,
+ * and leaving it stranded is how a PropLine slate ends up capped for credits
+ * that PropLine does not charge. So the seed follows the feed and a choice
+ * does not, which needs no flag recording whether the slider was ever touched.
+ */
+export function reseedGameCap(competition: LeagueConfig, stored: number, opts: PullBreadth = {}): number {
+  const seeded = maxGamesFor(competition, { ...opts, billsPerRequest: !opts.billsPerRequest })
+  return stored === seeded ? maxGamesFor(competition, opts) : stored
 }
 
 /**

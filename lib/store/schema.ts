@@ -5,7 +5,15 @@ import { DEFAULT_PROJECTION_SETTINGS, type ProjectionSettings, type RawPropRow }
 import { MARKETS, type MarketKey } from "@/lib/nba/markets"
 import type { FeedQuote } from "@/lib/quant/valuebets"
 import type { PickemLine } from "@/lib/odds-feed/propline"
-import { DEFAULT_LEAGUE, LEAGUES, isLeagueId, type LeagueId, type LoggedLeagueId } from "@/lib/leagues"
+import {
+  DEFAULT_LEAGUE,
+  LEAGUES,
+  isLeagueId,
+  leagueFor,
+  reseedGameCap,
+  type LeagueId,
+  type LoggedLeagueId,
+} from "@/lib/leagues"
 import { PICKEM_MAX_PROB } from "@/lib/today/build"
 
 export const STATE_VERSION = 1
@@ -204,6 +212,10 @@ export const DEFAULT_DAILY: DailySettings = {
   minEdge: 0.02,
   requireSharpReference: true,
   parlayLegs: 3,
+  // The per-market cap, because DEFAULT_ODDS_FEED is The Odds API and these
+  // defaults are one static object that cannot see the feed. Selecting
+  // PropLine reseeds it, and migrate() lifts an install that predates the
+  // split, both via reseedGameCap.
   maxGames: LEAGUES[DEFAULT_LEAGUE].maxGames,
   markets: null,
   companions: false,
@@ -506,6 +518,9 @@ export function migrate(raw: unknown): AppState {
   if (!raw || typeof raw !== "object") return EMPTY_STATE
   const o = raw as Partial<AppState>
   const s = (o.settings ?? {}) as Partial<AppSettings>
+  const oddsFeed = migrateOddsFeed(s.oddsFeed)
+  const dailyLeague = isLeagueId(s.daily?.league) ? s.daily.league : DEFAULT_LEAGUE
+  const storedCap = typeof s.daily?.maxGames === "number" ? s.daily.maxGames : DEFAULT_DAILY.maxGames
   return {
     version: STATE_VERSION,
     settings: {
@@ -513,10 +528,17 @@ export function migrate(raw: unknown): AppState {
       daily: {
         ...DEFAULT_DAILY,
         ...(s.daily ?? {}),
-        league: isLeagueId(s.daily?.league) ? s.daily.league : DEFAULT_LEAGUE,
+        league: dailyLeague,
+        // A cap stored before the per-request default existed is the credit
+        // default, which on PropLine leaves part of the slate unpulled to save
+        // credits PropLine never charges. Lifted only when it is exactly the
+        // other feed's default, so a cap anyone chose survives the upgrade.
+        maxGames: reseedGameCap(leagueFor(dailyLeague), storedCap, {
+          billsPerRequest: oddsFeed.provider === "propline",
+        }),
         underMargin: cleanMargins(s.daily?.underMargin),
       },
-      oddsFeed: migrateOddsFeed(s.oddsFeed),
+      oddsFeed,
       projection: {
         ...DEFAULT_PROJECTION_SETTINGS,
         ...(s.projection ?? {}),

@@ -11,7 +11,7 @@ import { FeedKeyError, normalizeProplineMany, pullPropline, resolveProplineKeySo
 import { resolveKey as resolveApiKey } from "@/lib/odds-feed/api-key"
 import { feedErrorText, fetchOddsApi, noneCouldBePriced, notStarted } from "@/lib/odds-feed/http"
 import type { FeedEvent, FeedEventOdds } from "@/lib/odds-feed/types"
-import { DEFAULT_LEAGUE, LEAGUE_IDS, isLeagueId, leagueFor } from "@/lib/leagues"
+import { DEFAULT_LEAGUE, LEAGUE_IDS, isLeagueId, leagueFor, maxGamesFor } from "@/lib/leagues"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -99,7 +99,9 @@ export async function POST(request: Request) {
 
   const markets = marketsForLeague(leagueId, body.markets)
   const regions = body.regions || "us,us2,eu"
-  const maxGames = Math.max(1, Math.min(body.maxGames ?? league.maxGames, 20))
+  // Feed-aware default: a game costs a market list on The Odds API and one
+  // request on PropLine. An explicit cap from the body still wins.
+  const maxGames = Math.max(1, Math.min(body.maxGames ?? maxGamesFor(league, { billsPerRequest: usePropline }), 20))
 
   // Only today's games. Without a window this used to price every event the
   // feed listed, which during the season is weeks of games, and props are
