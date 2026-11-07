@@ -15,7 +15,7 @@ import { DEVIG_METHODS, type DevigMethod } from "@/lib/quant/odds"
 import { payoutMultiple, payoutVerified, supportedPickCounts } from "@/lib/quant/payouts"
 import { exportState, importState } from "@/lib/store/local"
 import { useStore } from "@/lib/store/provider"
-import { companionsOf, creditPlan, leagueFor, pullPlan } from "@/lib/leagues"
+import { companionsOf, creditPlan, leagueFor, maxGamesFor, pullPlan, reseedGameCap } from "@/lib/leagues"
 import { marketsForCompetition, marketsForLeague } from "@/lib/odds-feed/theoddsapi"
 import { DEFAULT_SETTINGS, type OddsProvider } from "@/lib/store/schema"
 import { money } from "@/lib/format"
@@ -30,11 +30,18 @@ export default function SettingsPage() {
   // depends on which feed is selected.
   const billsPerRequest = s.oddsFeed.provider === "propline"
   const dailyMarkets = marketsForLeague(dailyLeague.id, s.daily.markets, { billsPerRequest })
+  // What a typed market list is costing on a feed that does not charge for
+  // width. Narrowing a per-market feed is a budget; narrowing a per-request
+  // one is a straight loss, and the board cannot say so in the abstract -- it
+  // has to name the markets that are being left on the table.
+  const freeBoard = dailyLeague.deepMarkets ?? dailyLeague.markets
+  const narrowingForFree = billsPerRequest ? freeBoard.filter((m) => !dailyMarkets.includes(m)) : []
   const companions = companionsOf(dailyLeague.id)
   // What one press of the selected league's button would spend, companions
   // included, billed per market per game at each competition's own list.
   const dailyCredits = pullPlan(dailyLeague.id, Math.max(1, Math.min(s.daily.maxGames, 20)), {
     companions: s.daily.companions,
+    billsPerRequest,
   }).reduce(
     // Including the ranking call a depth-ranked companion buys, so this agrees
     // with the figure the Today screen gates on.
@@ -274,7 +281,23 @@ export default function SettingsPage() {
                       key={p.id}
                       type="button"
                       aria-pressed={on}
-                      onClick={() => setSettings((prev) => ({ ...prev, oddsFeed: { ...prev.oddsFeed, provider: p.id } }))}
+                      onClick={() =>
+                        setSettings((prev) => ({
+                          ...prev,
+                          oddsFeed: { ...prev.oddsFeed, provider: p.id },
+                          // The game cap follows the feed when it was only the
+                          // other feed's default, and stays put when it was
+                          // chosen. PropLine bills per request, so a cap sized
+                          // for The Odds API's credits would leave part of the
+                          // slate unpulled for no saving.
+                          daily: {
+                            ...prev.daily,
+                            maxGames: reseedGameCap(leagueFor(prev.daily.league), prev.daily.maxGames, {
+                              billsPerRequest: p.id === "propline",
+                            }),
+                          },
+                        }))
+                      }
                       className={
                         on
                           ? "rounded-md bg-primary/15 px-3 py-1.5 font-mono text-[11px] text-primary ring-1 ring-primary/30"
@@ -431,12 +454,33 @@ export default function SettingsPage() {
                     <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
                       {companions.map((l) => l.label).join(" and ")} {companions.length === 1 ? "is" : "are"} the
                       same sport in the same week, so {companions.length === 1 ? "it rides" : "they ride"} inside
-                      this section rather than taking a tab. Off by default because it costs credits on top of the{" "}
-                      {dailyLeague.label} slate: {companions.map((l) => `${l.maxGames} games at ${l.markets.length} markets`).join(", ")}, so about{" "}
-                      {companions.reduce((a, l) => a + l.maxGames * l.markets.length, 0)} more per press. Each is
-                      priced with its own numbers and badged on every row. Turning it off keeps the games you have
-                      already paid for in this browser&apos;s cache and only leaves them out of the picks, so you
-                      can turn it back on without spending anything.
+                      this section rather than taking a tab. Off by default because it is not free:{" "}
+                      {billsPerRequest ? (
+                        <>
+                          on PropLine{" "}
+                          {companions
+                            .map((l) => `${maxGamesFor(l, { billsPerRequest })} more games`)
+                            .join(", ")}
+                          , so {companions.reduce((a, l) => a + maxGamesFor(l, { billsPerRequest }), 0)} more
+                          requests of the 1,000 a day, whatever the markets.
+                        </>
+                      ) : (
+                        <>
+                          it costs credits on top of the {dailyLeague.label} slate:{" "}
+                          {companions
+                            .map((l) => `${maxGamesFor(l)} games at ${marketsForCompetition(l, s.daily.markets).length} markets`)
+                            .join(", ")}
+                          , so about{" "}
+                          {companions.reduce(
+                            (a, l) => a + maxGamesFor(l) * marketsForCompetition(l, s.daily.markets).length,
+                            0,
+                          )}{" "}
+                          more per press.
+                        </>
+                      )}{" "}
+                      Each is priced with its own numbers and badged on every row. Turning it off keeps the games
+                      you have already paid for in this browser&apos;s cache and only leaves them out of the picks,
+                      so you can turn it back on without spending anything.
                     </p>
                   </div>
                   <Switch
@@ -551,6 +595,16 @@ export default function SettingsPage() {
                   Markets from another sport are ignored for that league, so a basketball list is never billed on NFL
                   games.
                 </p>
+                {narrowingForFree.length > 0 ? (
+                  <p className="mt-2 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-[11px] leading-relaxed text-destructive">
+                    This list is costing you {narrowingForFree.length} market
+                    {narrowingForFree.length === 1 ? "" : "s"} for nothing. PropLine bills one request per game
+                    whatever you ask for, so {narrowingForFree.join(", ")} would come back in the same{" "}
+                    {s.daily.maxGames + 1} requests you are already spending. Every one left out is a pick&apos;em
+                    line that cannot be read, and an entry is only ever built at a line an app is really posting — so
+                    a market nobody asked for is a leg you cannot play. Clear the box to pull the whole board.
+                  </p>
+                ) : null}
               </div>
             </div>
 

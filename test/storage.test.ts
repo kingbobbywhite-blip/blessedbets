@@ -139,3 +139,40 @@ describe("a localStorage save that does not fit", () => {
     expect(r.error).toContain("Could not save")
   })
 })
+
+describe("the game cap across a feed change", () => {
+  // An install that predates the per-request cap stored 14, the credit
+  // default. On PropLine that silently leaves the last game of a 15-game
+  // night unpulled to save credits PropLine does not charge.
+  it("lifts a seeded cap to the per-request default for a PropLine install", () => {
+    const state = migrate({
+      settings: { daily: { league: "nba", maxGames: 14 }, oddsFeed: { provider: "propline" } },
+    })
+    expect(state.settings.daily.maxGames).toBe(15)
+  })
+
+  it("leaves the credit default alone for an Odds API install", () => {
+    const state = migrate({
+      settings: { daily: { league: "nba", maxGames: 14 }, oddsFeed: { provider: "theoddsapi" } },
+    })
+    expect(state.settings.daily.maxGames).toBe(14)
+  })
+
+  it("never overrules a cap somebody chose", () => {
+    for (const provider of ["propline", "theoddsapi"]) {
+      const state = migrate({
+        settings: { daily: { league: "nba", maxGames: 6 }, oddsFeed: { provider } },
+      })
+      expect(state.settings.daily.maxGames, provider).toBe(6)
+    }
+  })
+
+  it("leaves a league with a single cap untouched on either feed", () => {
+    for (const provider of ["propline", "theoddsapi"]) {
+      const state = migrate({
+        settings: { daily: { league: "nfl", maxGames: 14 }, oddsFeed: { provider } },
+      })
+      expect(state.settings.daily.maxGames, provider).toBe(14)
+    }
+  })
+})

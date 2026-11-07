@@ -8,7 +8,7 @@ import {
 import { fitMovement, lineMoves, snapshotFor, snapshotRows, summariseHistory } from "@/lib/quant/lines"
 import { DEFAULT_VALUE_SETTINGS, KICKOFF_VARIANCE_PER_DAY, type FeedQuote } from "@/lib/quant/valuebets"
 import { DEFAULT_PROJECTION_SETTINGS } from "@/lib/quant/projection"
-import { MAX_LINE_SNAPSHOTS, migrate, type LineSnapshot } from "@/lib/store/schema"
+import { MAX_LINE_SNAPSHOTS, MAX_SNAPSHOT_ROWS, migrate, type LineSnapshot } from "@/lib/store/schema"
 import { reduceForQuota } from "@/lib/store/local"
 import { EMPTY_STATE } from "@/lib/store/schema"
 
@@ -225,9 +225,82 @@ describe("line history", () => {
     expect(fitMovement(lineMoves([pull(245.5, 96, now), pull(258.5, 2, now)]))).toEqual([])
   })
 
+  it("keeps the same props in every pull, so an over-cap slate still pairs", () => {
+    // The thing the cap used to break. A pair needs the SAME prop in TWO
+    // snapshots, so if each pull keeps a different subset the fit collapses
+    // far faster than the row count suggests: two independent 60% subsets of
+    // a slate share about 36% of it.
+    const now = Date.parse("2026-11-04T18:00:00Z")
+    const later = now + 20 * 3_600_000
+    const books = ["pinnacle", "draftkings", "fanduel", "betmgm"]
+
+    // Twice the cap, so both pulls are truncated hard. The quotes are offered
+    // in a DIFFERENT order each time, which is what a real feed does and what
+    // arrival-order slicing turned into a different kept set.
+    const props = Array.from({ length: MAX_SNAPSHOT_ROWS * 2 }, (_, i) => i)
+    const build = (at: number, hoursOut: number, order: number[]) =>
+      snapshotFor(
+        "nfl",
+        order.flatMap((i) =>
+          books.map((b) => ({ ...quote(`Passer ${i}`, 245.5, b, hoursOut, at), gameId: `Away${i}@Home${i}` })),
+        ),
+        SETTINGS,
+        at,
+        new Date(at).toISOString(),
+      )
+
+    const early = build(now, 96, props)
+    const late = build(later, 76, [...props].reverse())
+
+    expect(early.rows).toHaveLength(MAX_SNAPSHOT_ROWS)
+    expect(late.rows).toHaveLength(MAX_SNAPSHOT_ROWS)
+    expect(early.truncated).toBe(MAX_SNAPSHOT_ROWS)
+    expect(late.truncated).toBe(MAX_SNAPSHOT_ROWS)
+
+    // The kept set is identical despite the reversed input, so every kept row
+    // pairs rather than roughly a third of them.
+    const keyOf = (r: { key: string }) => r.key
+    expect(new Set(late.rows.map(keyOf))).toEqual(new Set(early.rows.map(keyOf)))
+    expect(lineMoves([early, late])).toHaveLength(MAX_SNAPSHOT_ROWS)
+
+    // And the readout says rows went, because a thin pair count otherwise
+    // reads as "pull again on game day" when pulling again will not fix it.
+    expect(summariseHistory([early, late]).truncated).toBe(MAX_SNAPSHOT_ROWS * 2)
+  })
+
+  it("drops the thinnest markets first, and keeps a deep prop over a one-book one", () => {
+    // Depth decides which rows go, because a line only one book posts says
+    // little about the market revising its own opinion.
+    const now = Date.parse("2026-11-04T18:00:00Z")
+    const deep = Array.from({ length: MAX_SNAPSHOT_ROWS }, (_, i) =>
+      ["pinnacle", "draftkings", "fanduel", "betmgm"].map((b) => ({
+        ...quote(`Deep ${i}`, 245.5, b, 96, now),
+        gameId: `DAway${i}@DHome${i}`,
+      })),
+    ).flat()
+    const thin = Array.from({ length: 200 }, (_, i) => ({
+      ...quote(`Thin ${i}`, 245.5, "draftkings", 96, now),
+      gameId: `TAway${i}@THome${i}`,
+    }))
+
+    const snap = snapshotFor("nfl", [...thin, ...deep], SETTINGS, now, new Date(now).toISOString())
+    expect(snap.rows).toHaveLength(MAX_SNAPSHOT_ROWS)
+    expect(snap.truncated).toBe(200)
+    // Every survivor is a four-book prop; the one-book rows are what went.
+    expect(snap.rows.every((r) => r.player.startsWith("Deep "))).toBe(true)
+  })
+
+  it("leaves a snapshot that fits without a truncation count", () => {
+    const now = Date.parse("2026-11-04T18:00:00Z")
+    const snap = pull(245.5, 96, now)
+    expect(snap.rows).toHaveLength(1)
+    expect(snap.truncated).toBeUndefined()
+    expect(summariseHistory([snap]).truncated).toBe(0)
+  })
+
   it("counts what it has, so an empty readout reads as empty rather than broken", () => {
     const now = Date.parse("2026-11-04T18:00:00Z")
-    expect(summariseHistory([])).toEqual({ snapshots: 0, props: 0, paired: 0, widestDays: 0 })
+    expect(summariseHistory([])).toEqual({ snapshots: 0, props: 0, paired: 0, widestDays: 0, truncated: 0 })
     const one = summariseHistory([pull(245.5, 96, now)])
     expect(one).toMatchObject({ snapshots: 1, props: 1, paired: 0 })
   })

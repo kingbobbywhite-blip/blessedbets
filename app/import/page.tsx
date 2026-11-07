@@ -25,7 +25,7 @@ import {
 import { feedKeyFor } from "@/lib/odds-feed/theoddsapi"
 import { attachQuotes, indexQuotes, type NormalizedQuote } from "@/lib/odds-feed/theoddsapi"
 import { useStore } from "@/lib/store/provider"
-import { LEAGUES, LEAGUE_IDS, leagueFor, type LeagueId } from "@/lib/leagues"
+import { LEAGUES, LEAGUE_IDS, leagueFor, maxGamesForLeague, type LeagueId } from "@/lib/leagues"
 
 export default function ImportPage() {
   const router = useRouter()
@@ -206,7 +206,7 @@ export default function ImportPage() {
           league,
           from: startOfToday().toISOString(),
           to: endOfSlate().toISOString(),
-          maxGames: leagueFor(league).maxGames,
+          maxGames: maxGamesForLeague(league, { billsPerRequest: state.settings.oddsFeed.provider === "propline" }),
           markets: wanted,
           regions: state.settings.oddsFeed.regions,
           bookmakers: state.settings.oddsFeed.books,

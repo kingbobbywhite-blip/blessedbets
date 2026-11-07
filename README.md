@@ -10,9 +10,10 @@ Add a book under Settings if you open an account there.
 
 Two tabs: **NBA** and **NFL**, with the NBA the one the board is built for. **College football
 rides inside the NFL tab**, off by default: turn the switch on under Settings → Today and one press
-pulls both, each priced with its own numbers, with a college row badged CFB wherever it appears —
-and because that press costs 80 credits rather than 56, the button asks before spending it. Each tab
-keeps its own cached pull, so switching never throws away a slate you already paid feed credits for.
+pulls both, each priced with its own numbers, with a college row badged CFB wherever it appears.
+On PropLine that is six more requests of the daily 1,000; on The Odds API it takes the press from 56
+credits to 80, and the button asks before spending it. Each tab keeps its own cached pull, so
+switching never throws away a slate you already paid for.
 
 The NHL was removed. Nothing pulls or prices it; a logged NHL entry still reads back off a
 screenshot and still settles, because its stats are hockey's and a read that forgot that would
@@ -51,12 +52,22 @@ itself, and it says so. The comparison is against the estimate for the requests 
 completed, so one failed game cannot read as an answer. A request that reports no cost counts as
 unmeasured, never as free: the total is then called a floor rather than quoted as a sum.
 
-**Two feeds can price the slate.** [The Odds API](https://the-odds-api.com) carries Pinnacle's
-player props and bills per market per game against 500 credits a month.
-[PropLine](https://prop-line.com) bills per request against 1,000 a day and also carries the
-lines **PrizePicks and Underdog are actually posting**. Pick the provider under Settings → Odds
-feed. A PropLine key also works alongside The Odds API: Pinnacle prices the props, PropLine
-supplies the pick'em apps' lines, and the pick'em entry is built at the line your app shows.
+**Two feeds can price the slate, and PropLine is the default.**
+[PropLine](https://prop-line.com) bills per request against 1,000 a day — one per game whatever
+the market list, so width is free and a full NBA night is 16 requests — and carries the lines
+**PrizePicks and Underdog are actually posting**, which is what a pick'em entry has to be built
+at. [The Odds API](https://the-odds-api.com) is the sharper of the two and the only one carrying
+Pinnacle's player props, but it bills per market per game against 500 credits a month: a full NBA
+night at five markets is 70, about seven presses. So PropLine pulls the slate every night and The
+Odds API answers "what does Pinnacle say about this one prop". Pick the provider under
+Settings → Odds feed. A PropLine key also works alongside The Odds API: Pinnacle prices the
+props, PropLine supplies the pick'em apps' lines, and the pick'em entry is built at the line your
+app shows.
+
+What PropLine costs is Pinnacle: it carries no Pinnacle player props, so the sharp reference
+behind a prop there is BetOnline and LowVig, and those count as one book. That is why **Require
+sharp reference** stays on, and why a prop no market maker priced is held to the lesser of the
+consensus and the retail books' own number.
 
 ## Running it
 
@@ -124,8 +135,11 @@ stands.
 
 ### The API key
 
-The app needs sportsbook prices. Get a key from
-[the-odds-api.com](https://the-odds-api.com) (the free tier is 500 requests a month).
+The app needs sportsbook prices. Get a key from [prop-line.com](https://prop-line.com) (free,
+1,000 requests a day). That is the default feed and the one to get first: it bills one request
+per game whatever the market list, so a full NBA night is 16 requests of the 1,000 and the whole
+eleven-market board comes back for the price of four — and it carries the lines PrizePicks and
+Underdog are really posting, which is what a pick'em entry has to be built at.
 
 The simplest place for it is **Settings → Odds feed** in the running app: paste it there and
 it is kept in your browser. To keep it in a file instead, copy the example file and put the
@@ -140,9 +154,15 @@ precedence over one in Settings. Avoid `echo KEY=... > .env.local` in Windows
 PowerShell 5: it writes the file as UTF-16, and the key in it is never read. Without a
 working key the app has no prices, and it will say so rather than invent an edge.
 
-Optionally add a [PropLine](https://prop-line.com) key (free, 1,000 requests a day) to read the
-pick'em apps' own lines, or to price the whole slate from PropLine instead. It goes in the
-same Settings tab, or on the `PROPLINE_API_KEY=` line of `.env.local`.
+Optionally add an [Odds API](https://the-odds-api.com) key (free tier: 500 requests a
+month) as well. It is the sharper of the two and the only feed here carrying **Pinnacle's**
+player props, which dominate a consensus by design — but it bills per market per game, so a full
+NBA night at five markets is 70 of the 500, about seven presses. Keep it for a Pinnacle read on a
+prop you are about to bet rather than for pulling a slate every night. It goes in the same
+Settings tab, or on the `ODDS_API_KEY=` line of `.env.local`.
+
+With one key set the app selects that feed on first run; with both, PropLine. Nothing moves a
+phone onto a feed it has no key for.
 
 The same caution about public deployments applies: leave `PROPLINE_API_KEY` unset on an
 unprotected URL and enter the key in Settings instead.
@@ -250,6 +270,12 @@ that region and leaving it out silently removes the most useful price on the boa
 Player props are billed **per market per game**. Four markets across a twelve-game slate is
 48 credits for one refresh, so the free tier is about ten refreshes a month. Narrow the
 market list rather than the book list: books are free, markets are not.
+
+Narrow the market list rather than the game cap, too. Games are the other factor of the bill, but
+cutting them is not free in the way it looks: outside the depth-ranked college slate the cap takes
+games in **start order**, so a lower cap drops the latest tip rather than the thinnest market. On
+PropLine, which bills per request, a game costs one request of 1,000 a day and the cap should just
+be the whole slate.
 
 | Column (for pasted data) | Matters |
 | --- | --- |
@@ -476,17 +502,33 @@ imported board — and slips are never shed: they are the only record of what th
 | Feed sport key | `basketball_nba` | `americanfootball_nfl` | `americanfootball_ncaaf` |
 | Markets, per-market feed | pts, reb, ast, 3pm, pra | pass yds, rush yds, rec yds, receptions | same as the NFL |
 | Markets, per-request feed | the whole board: 11 | same four | same as the NFL |
-| Default game cap | 14 | 14 | 6 |
+| Default game cap, per-market feed | 14 | 14 | 6 |
+| Default game cap, per-request feed | 15 | 14 | 6 |
 | Volatility prior | baseline | its own markets | +20% on the NFL's (unfitted) |
 | One default press | 70 credits | 56 credits | +24, and +1 to rank them |
 
-**How wide a press asks is a question about billing.** The Odds API charges markets × games, so
-its market list is a budget: the NBA's five put a full 14-game night at 70 credits, 14% of a
-500-request month, which is under the share that makes the button stop and ask. PropLine charges
-one request per game whatever the list, so the same budget buys nothing there — on PropLine the
-NBA pulls its whole board, eleven markets for the price of four. Every market left out is a
-pick'em line that could have been read and was not, and since an entry is built only at lines an
-app is really posting, a market nobody asked for is a leg you cannot play.
+**How wide a press asks is a question about billing, and so is how many games.** The Odds API
+charges markets × games, so both are a budget: the NBA's five markets put a full 14-game night at
+70 credits, 14% of a 500-request month, which is under the share that makes the button stop and
+ask. PropLine charges one request per game whatever the list, so the same budget buys nothing
+there — on PropLine the NBA pulls its whole board, eleven markets for the price of four, across
+all 15 games for 16 requests of the 1,000 a day. Every market left out is a pick'em line that
+could have been read and was not, and since an entry is built only at lines an app is really
+posting, a market nobody asked for is a leg you cannot play.
+
+**The game cap splits the same way, for the same reason.** 30 teams means 15 games is the biggest
+night the NBA can have, and on PropLine that is 1.6% of a day — so the cap there is the whole
+slate. On The Odds API the fifteenth game costs a whole market list: 15 × 5 is 75 credits, exactly
+the 15% of a month that makes the button ask, and a default press that asks every single time
+teaches you to click through the one gate protecting the quota. So the NBA carries two defaults,
+14 and 15, and the feed picks. **This matters because the cap is not a quality filter.** Only a
+depth-ranked competition chooses which games to spend it on; everyone else takes them in start
+order, so a cap below the slate drops the latest game rather than the worst one — on a 15-game
+night, the late West Coast tip, every time.
+
+Changing feed moves the cap with it when the stored cap was only the other feed's default, and
+leaves it alone when it is a number you chose. An install from before the split that sits on
+PropLine at 14 is moved to 15 on load, for the same reason.
 
 The rest of the NBA board, free on PropLine and addable under Settings → Markets on The Odds API:
 pts+reb, pts+ast, reb+ast, steals, blocks, steals+blocks.
@@ -545,6 +587,9 @@ presses from an empty month — the pull is a confirm rather than a note beside 
 note is read after the credits are gone. The figure is summed per competition, since each can be
 asked for a different market list and credits are billed per market per game. A full Sunday with
 college football switched on is 80 credits, so that press asks; the NFL alone, at 56, does not.
+Neither does a full NBA night at its per-market cap, at 70 — which is why that cap is 14 and not
+the 15 PropLine pulls: the fifteenth game would put the default press at exactly 75 and make the
+gate fire on every single press, which is how a gate stops being read.
 
 **Yardage carries a floor on its relative spread.** A ratio prior implies that the spread
 grows with the square root of the projection, so a 340-yard passing line came out with a

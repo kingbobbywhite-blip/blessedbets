@@ -73,7 +73,8 @@ describe("bettable books", () => {
   })
 })
 
-import { migrate } from "@/lib/store/schema"
+import { DEFAULT_ODDS_FEED, migrate } from "@/lib/store/schema"
+import { LEAGUES, maxGamesFor } from "@/lib/leagues"
 
 describe("the books in the rotation", () => {
   it("recommends bets at FanDuel only by default; the sharp books stay references", () => {
@@ -106,10 +107,102 @@ describe("PropLine settings", () => {
     expect(old.settings.oddsFeed.pickemLines).toBe(true)
   })
 
-  it("falls back to The Odds API for a provider it does not know", () => {
-    const odd = migrate({ settings: { oddsFeed: { provider: "pinnwire" as never } } })
-    expect(odd.settings.oddsFeed.provider).toBe("theoddsapi")
+  it("falls back by the keys it holds for a provider it does not know", () => {
+    // An unknown name is not a choice, so the keys decide. Only an install
+    // holding neither key gets the bare default -- which is the point: the
+    // default must never move a phone onto a feed it cannot call.
+    const neither = migrate({ settings: { oddsFeed: { provider: "pinnwire" as never } } })
+    expect(neither.settings.oddsFeed.provider).toBe(DEFAULT_ODDS_FEED.provider)
+
+    const oddsApiOnly = migrate({ settings: { oddsFeed: { provider: "pinnwire" as never, apiKey: "abc" } } })
+    expect(oddsApiOnly.settings.oddsFeed.provider).toBe("theoddsapi")
+
+    const proplineOnly = migrate({ settings: { oddsFeed: { provider: "pinnwire" as never, proplineKey: "abc" } } })
+    expect(proplineOnly.settings.oddsFeed.provider).toBe("propline")
+
+    // A placeholder left in a copied example file is not a key, so it cannot
+    // select a feed that will 401.
+    const placeholder = migrate({
+      settings: { oddsFeed: { provider: "pinnwire" as never, apiKey: "abc", proplineKey: "xxxx" } },
+    })
+    expect(placeholder.settings.oddsFeed.provider).toBe("theoddsapi")
+
+    // A name it knows is honoured whatever the keys say.
     expect(migrate({ settings: { oddsFeed: { provider: "propline" } } }).settings.oddsFeed.provider).toBe("propline")
+    expect(
+      migrate({ settings: { oddsFeed: { provider: "theoddsapi", apiKey: "abc" } }, version: 2 }).settings.oddsFeed
+        .provider,
+    ).toBe("theoddsapi")
+  })
+
+  it("ships a game cap that matches the feed it ships", () => {
+    // The two defaults are set in different places and nothing but this test
+    // ties them together. A fresh install on PropLine with the credit cap
+    // would leave the last game of a 15-game night unpulled to save credits
+    // PropLine does not charge, which is the mismatch the split removes --
+    // and no other test would notice, because each default is valid alone.
+    expect(DEFAULT_SETTINGS.daily.maxGames).toBe(
+      maxGamesFor(LEAGUES[DEFAULT_SETTINGS.daily.league], {
+        billsPerRequest: DEFAULT_ODDS_FEED.provider === "propline",
+      }),
+    )
+    // Stated concretely too, so a change to either default has to come here
+    // and say what it meant rather than quietly tracking a formula.
+    expect(DEFAULT_ODDS_FEED.provider).toBe("propline")
+    expect(DEFAULT_SETTINGS.daily.maxGames).toBe(15)
+    // And a blank market list, so the per-request board is pulled whole.
+    expect(DEFAULT_SETTINGS.daily.markets).toBeNull()
+  })
+
+  it("moves an install that never chose a feed onto PropLine, once, and only with a key", () => {
+    // The upgrade to STATE_VERSION 2. Guarded on a stored PropLine key,
+    // because moving a phone onto a feed it cannot call does not cost a
+    // preference, it stops the app pulling.
+    const withKey = migrate({
+      settings: { oddsFeed: { provider: "theoddsapi", apiKey: "abc", proplineKey: "pk" } },
+    })
+    expect(withKey.settings.oddsFeed.provider).toBe("propline")
+
+    // No PropLine key: left where it is, to switch in Settings in one click.
+    const without = migrate({ settings: { oddsFeed: { provider: "theoddsapi", apiKey: "abc" } } })
+    expect(without.settings.oddsFeed.provider).toBe("theoddsapi")
+
+    // Already upgraded, so a deliberate return to The Odds API sticks.
+    const again = migrate({
+      version: 2,
+      settings: { oddsFeed: { provider: "theoddsapi", apiKey: "abc", proplineKey: "pk" } },
+    })
+    expect(again.settings.oddsFeed.provider).toBe("theoddsapi")
+  })
+
+  it("clears a stored market list that was narrowing a per-request feed, once", () => {
+    // Four NBA markets on PropLine is four of eleven for the same requests.
+    const narrowed = migrate({
+      settings: {
+        oddsFeed: { provider: "propline", proplineKey: "pk" },
+        daily: { league: "nba", markets: ["player_points", "player_rebounds"] },
+      },
+    })
+    expect(narrowed.settings.daily.markets).toBeNull()
+
+    // The same list on The Odds API is a credit budget somebody meant.
+    const budget = migrate({
+      settings: {
+        oddsFeed: { provider: "theoddsapi", apiKey: "abc" },
+        daily: { league: "nba", markets: ["player_points", "player_rebounds"] },
+      },
+    })
+    expect(budget.settings.daily.markets).toEqual(["player_points", "player_rebounds"])
+
+    // Already upgraded: a list typed after the change is a choice and stays.
+    const after = migrate({
+      version: 2,
+      settings: {
+        oddsFeed: { provider: "propline", proplineKey: "pk" },
+        daily: { league: "nba", markets: ["player_points"] },
+      },
+    })
+    expect(after.settings.daily.markets).toEqual(["player_points"])
   })
 
   it("keeps the pick'em lines on a cached pull", () => {

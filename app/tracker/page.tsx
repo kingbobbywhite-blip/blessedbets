@@ -32,7 +32,7 @@ import {
   type SideRecord,
 } from "@/lib/tracker/entries"
 import { useStore } from "@/lib/store/provider"
-import type { LegResult, TrackedSlip } from "@/lib/store/schema"
+import { MAX_SNAPSHOT_ROWS, type LegResult, type TrackedSlip } from "@/lib/store/schema"
 import { money, multiple, pct, shortDate, signedPct } from "@/lib/format"
 import { isLoggedLeagueId, loggedLeagueLabel, loggedLeagueShort } from "@/lib/leagues"
 import { MARKETS } from "@/lib/nba/markets"
@@ -509,6 +509,15 @@ export default function TrackerPage() {
             : history.paired > 0
               ? "Not enough pairs in any one market yet to measure anything. Eight is the floor, and a number built on fewer would be worse than the prior it replaced."
               : "Nothing to measure yet. This needs the same prop pulled twice, hours apart — the easiest way is a pull in the morning and another near the first kick-off. Nothing here can manufacture that second look: a refresh costs credits, and the cache exists precisely so the app never spends them on its own."}{" "}
+          {history.truncated > 0 ? (
+            <>
+              {history.truncated} row{history.truncated === 1 ? "" : "s"} across the pulls held{" "}
+              {history.truncated === 1 ? "was" : "were"} dropped to fit browser storage, which caps each pull at{" "}
+              {MAX_SNAPSHOT_ROWS} props. The ones kept are chosen the same way in every pull — deepest markets first,
+              then a fixed order — so a prop that survives one pull survives the next and can still pair. A slate this
+              size still measures fewer props than it priced.{" "}
+            </>
+          ) : null}
           One limit worth knowing: Today pulls from local midnight to 11am tomorrow, so two looks at one prop can be
           hours to about a day apart, never the four days a midweek NFL line actually drifts over. What is measured
           here is the last day&apos;s movement scaled up, which is a lower bound on the week&apos;s. Until there is

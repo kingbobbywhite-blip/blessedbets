@@ -1,5 +1,5 @@
 import { distributionFor, MARKETS, type MarketKey } from "@/lib/nba/markets"
-import { MAX_SNAPSHOT_ROWS, type LineSnapshot, type LineSnapshotRow } from "@/lib/store/schema"
+import { MAX_SNAPSHOT_ROWS, rankSnapshotRows, type LineSnapshot, type LineSnapshotRow } from "@/lib/store/schema"
 import type { LeagueId } from "@/lib/leagues"
 import { marketLineOf } from "@/lib/today/build"
 import { groupQuotes, referenceProjection, type FeedQuote, type ValueBetSettings } from "./valuebets"
@@ -90,8 +90,14 @@ export function snapshotFor(
   pulledAt: string,
 ): LineSnapshot {
   // Capped here as well as on load, so a single enormous slate cannot blow the
-  // storage budget before anything has a chance to prune it.
-  return { pulledAt, league, rows: snapshotRows(quotes, settings, now).slice(0, MAX_SNAPSHOT_ROWS) }
+  // storage budget before anything has a chance to prune it. Ranked first, so
+  // the rows that go are the ones worth least and the rows that stay are the
+  // same ones the next pull will keep.
+  const all = snapshotRows(quotes, settings, now)
+  const rows = rankSnapshotRows(all).slice(0, MAX_SNAPSHOT_ROWS)
+  const dropped = all.length - rows.length
+  // Only when it happened, so an ordinary snapshot carries no extra bytes.
+  return { pulledAt, league, rows, ...(dropped > 0 ? { truncated: dropped } : {}) }
 }
 
 /** The same prop seen twice, at two distances from kick-off. */
@@ -233,6 +239,14 @@ export interface LineHistorySummary {
   paired: number
   /** The widest gap any pair covers, in days. */
   widestDays: number
+  /**
+   * Rows the storage cap dropped across every snapshot held.
+   *
+   * Surfaced because a thin pair count has two very different causes -- no
+   * game-day pull, or a slate too big to store whole -- and only one of them
+   * is fixed by pulling again.
+   */
+  truncated: number
 }
 
 export function summariseHistory(snapshots: LineSnapshot[]): LineHistorySummary {
@@ -244,5 +258,6 @@ export function summariseHistory(snapshots: LineSnapshot[]): LineHistorySummary 
     props: keys.size,
     paired: moves.length,
     widestDays: moves.reduce((a, m) => Math.max(a, m.days), 0),
+    truncated: snapshots.reduce((a, s) => a + (s.truncated ?? 0), 0),
   }
 }

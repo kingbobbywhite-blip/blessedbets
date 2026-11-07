@@ -5,10 +5,25 @@ import { DEFAULT_PROJECTION_SETTINGS, type ProjectionSettings, type RawPropRow }
 import { MARKETS, type MarketKey } from "@/lib/nba/markets"
 import type { FeedQuote } from "@/lib/quant/valuebets"
 import type { PickemLine } from "@/lib/odds-feed/propline"
-import { DEFAULT_LEAGUE, LEAGUES, isLeagueId, type LeagueId, type LoggedLeagueId } from "@/lib/leagues"
+import {
+  DEFAULT_LEAGUE,
+  LEAGUES,
+  LEAGUE_IDS,
+  isLeagueId,
+  leagueFor,
+  maxGamesFor,
+  reseedGameCap,
+  type LeagueId,
+  type LoggedLeagueId,
+} from "@/lib/leagues"
+import { usableKey } from "@/lib/odds-feed/api-key"
 import { PICKEM_MAX_PROB } from "@/lib/today/build"
 
-export const STATE_VERSION = 1
+/**
+ * 2 moved the default feed to PropLine and stopped a stored market list
+ * narrowing a feed that does not charge for width. See migrate().
+ */
+export const STATE_VERSION = 2
 
 export interface BankrollSettings {
   bankroll: number
@@ -68,7 +83,28 @@ export interface OddsFeedSettings {
 }
 
 export const DEFAULT_ODDS_FEED: OddsFeedSettings = {
-  provider: "theoddsapi",
+  /**
+   * PropLine, because the binding constraint on a daily board is how often you
+   * can pull it, not how sharp one price is.
+   *
+   * The Odds API carries Pinnacle, which is the strongest reference there is
+   * and dominates a consensus by design. It also bills markets x games against
+   * 500 credits a month: a full NBA night at five markets is 70, so about seven
+   * presses, and a season is 165 days. There is no setting that makes that a
+   * daily board. PropLine bills one request per game whatever the market list,
+   * so the same night is 16 of 1,000 a day, the whole eleven-market board comes
+   * back for the price of four, and it carries the lines PrizePicks and
+   * Underdog are really posting -- which is what an entry has to be built at.
+   *
+   * What it costs is Pinnacle: PropLine carries no Pinnacle player props, so
+   * the sharp reference behind a prop there is BetOnline and LowVig, which
+   * count as one book. That is why requireSharpReference stays on and why a
+   * prop no market maker priced is held to the lesser of the consensus and the
+   * retail books' own number. The Odds API is still the right feed for a
+   * Pinnacle read on a prop you are about to bet; it is the wrong one for
+   * pulling a slate every night.
+   */
+  provider: "propline",
   apiKey: "",
   proplineKey: "",
   pickemLines: true,
@@ -204,7 +240,17 @@ export const DEFAULT_DAILY: DailySettings = {
   minEdge: 0.02,
   requireSharpReference: true,
   parlayLegs: 3,
-  maxGames: LEAGUES[DEFAULT_LEAGUE].maxGames,
+  // Sized to the feed these defaults also ship, not to one of the two caps
+  // picked by hand: the NBA keeps a per-market cap and a per-request one, and
+  // a fresh install that shipped PropLine with the credit cap would leave the
+  // last game of a 15-game night unpulled to save credits PropLine does not
+  // charge -- the exact mismatch the split exists to remove. Changing either
+  // default alone therefore cannot desync them. Selecting the other feed
+  // reseeds this, and migrate() lifts an install that predates the split,
+  // both via reseedGameCap.
+  maxGames: maxGamesFor(LEAGUES[DEFAULT_LEAGUE], {
+    billsPerRequest: DEFAULT_ODDS_FEED.provider === "propline",
+  }),
   markets: null,
   companions: false,
   pickemMaxProb: PICKEM_MAX_PROB,
@@ -453,6 +499,14 @@ export interface LineSnapshot {
   pulledAt: string
   league: LeagueId
   rows: LineSnapshotRow[]
+  /**
+   * Rows the storage cap dropped from this pull, when it dropped any.
+   *
+   * Absent on a snapshot that fitted, which is the ordinary case. Kept
+   * because a pair count that looks thin has two causes and only one of them
+   * is "pull again on game day".
+   */
+  truncated?: number
 }
 
 /**
@@ -471,8 +525,69 @@ export interface LineSnapshot {
  */
 export const MAX_LINE_SNAPSHOTS = 8
 
-/** Rows kept per snapshot, newest-priced first. A full NFL pull is about 1,100. */
+/**
+ * Rows kept per snapshot. A full NFL pull is about 1,100, so the NFL fits
+ * whole; a 15-game NBA night across eleven markets does not, and the rows
+ * that go are chosen by rankSnapshotRows rather than by arrival order -- see
+ * there for why the choice decides whether the history is worth keeping at
+ * all. This is the backstop for a slate far bigger than the NFL's.
+ */
 export const MAX_SNAPSHOT_ROWS = 1500
+
+/**
+ * A stable 32-bit hash (FNV-1a) of a prop's identity.
+ *
+ * Stable is the whole requirement: the same prop must sort to the same place
+ * in a pull taken on Tuesday and a pull taken on Saturday, with no state
+ * carried between them.
+ */
+function stableHash(text: string): number {
+  let h = 0x811c9dc5
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i)
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  return h >>> 0
+}
+
+/**
+ * How deep a row's market is, in tiers coarse enough to be stable.
+ *
+ * A prop's exact book count moves from night to night; whether it has a real
+ * consensus, a thin one, or a single book does not. Tiers rather than the raw
+ * number keep the kept set from churning on noise.
+ */
+function depthTier(books: number): number {
+  if (books >= 4) return 0
+  if (books >= 2) return 1
+  return 2
+}
+
+/**
+ * Which rows to keep when a slate carries more props than storage allows.
+ *
+ * Truncation is not a detail here, it is the entire value of the history. A
+ * pair needs the SAME prop to survive in TWO snapshots, so dropping rows in
+ * whatever order the quotes happened to arrive loses pairs far faster than it
+ * loses rows: two snapshots that each keep a different 60% of a slate share
+ * only about 36% of it, and the fit is built on what they share. Slicing an
+ * unordered list is therefore close to the worst available policy, and it is
+ * what this did.
+ *
+ * So the order is stable across pulls and independent of how big the slate
+ * was. Depth first, in tiers a prop does not cross on noise, because a line
+ * only one book posts says little about the market revising its own opinion.
+ * Within a tier a hash of the prop's own identity decides: arbitrary, but
+ * identical in every pull, so a midweek look and a game-day look keep the
+ * same props and actually pair.
+ */
+export function rankSnapshotRows(rows: LineSnapshotRow[]): LineSnapshotRow[] {
+  return [...rows].sort((a, b) => {
+    const tier = depthTier(a.books) - depthTier(b.books)
+    if (tier !== 0) return tier
+    return stableHash(`${a.key}|${a.market}`) - stableHash(`${b.key}|${b.market}`)
+  })
+}
 
 export interface AppState {
   version: number
@@ -506,6 +621,10 @@ export function migrate(raw: unknown): AppState {
   if (!raw || typeof raw !== "object") return EMPTY_STATE
   const o = raw as Partial<AppState>
   const s = (o.settings ?? {}) as Partial<AppSettings>
+  const storedVersion = typeof o.version === "number" ? o.version : 0
+  const oddsFeed = migrateToProplineDefault(migrateOddsFeed(s.oddsFeed), storedVersion)
+  const dailyLeague = isLeagueId(s.daily?.league) ? s.daily.league : DEFAULT_LEAGUE
+  const storedCap = typeof s.daily?.maxGames === "number" ? s.daily.maxGames : DEFAULT_DAILY.maxGames
   return {
     version: STATE_VERSION,
     settings: {
@@ -513,10 +632,18 @@ export function migrate(raw: unknown): AppState {
       daily: {
         ...DEFAULT_DAILY,
         ...(s.daily ?? {}),
-        league: isLeagueId(s.daily?.league) ? s.daily.league : DEFAULT_LEAGUE,
+        league: dailyLeague,
+        // A cap stored before the per-request default existed is the credit
+        // default, which on PropLine leaves part of the slate unpulled to save
+        // credits PropLine never charges. Lifted only when it is exactly the
+        // other feed's default, so a cap anyone chose survives the upgrade.
+        maxGames: reseedGameCap(leagueFor(dailyLeague), storedCap, {
+          billsPerRequest: oddsFeed.provider === "propline",
+        }),
+        markets: migrateMarketList(s.daily?.markets ?? null, oddsFeed.provider, storedVersion),
         underMargin: cleanMargins(s.daily?.underMargin),
       },
-      oddsFeed: migrateOddsFeed(s.oddsFeed),
+      oddsFeed,
       projection: {
         ...DEFAULT_PROJECTION_SETTINGS,
         ...(s.projection ?? {}),
@@ -565,9 +692,83 @@ function migrateCapturedPayouts(raw: unknown): Record<string, CapturedPayout> {
  * A bettable list still at the old five-book default was never chosen, so it
  * moves to the new one. A list someone edited is theirs and is kept.
  */
+/**
+ * Move an install that never chose a feed onto the new default.
+ *
+ * Runs once, for a blob written before STATE_VERSION 2. Guarded two ways,
+ * because getting this wrong does not cost a preference, it stops the app
+ * pulling at all: the install must still be on the OLD default, so a feed
+ * anybody picked on purpose is left alone, and it must already hold a usable
+ * PropLine key, so nobody is moved onto a feed that cannot answer. A key set
+ * only as PROPLINE_API_KEY in the environment is invisible here, so those
+ * installs stay where they are and can switch in Settings in one click --
+ * the conservative way round.
+ */
+function migrateToProplineDefault(feed: OddsFeedSettings, storedVersion: number): OddsFeedSettings {
+  if (storedVersion >= 2) return feed
+  if (feed.provider !== "theoddsapi") return feed
+  if (usableKey(feed.proplineKey) == null) return feed
+  return { ...feed, provider: "propline" }
+}
+
+/**
+ * Clear a stored market list that is costing markets for nothing.
+ *
+ * A list is a budget on a feed billed per market per game, and someone who
+ * narrowed The Odds API to stay under their quota meant it -- that list
+ * survives. On PropLine the same list buys nothing: width is free, one request
+ * per game whatever is asked for, so a four-market list holds the NBA to four
+ * of eleven and every market left out is a pick'em line that cannot be read.
+ * Since an entry is built only at lines an app is really posting, those are
+ * legs that cannot be played.
+ *
+ * So this clears a list once, for a blob written before STATE_VERSION 2, and
+ * only when the install is on a per-request feed and the list is narrower than
+ * that feed's free board. A list that already covers the board is not
+ * narrowing anything and is left as it is.
+ */
+function migrateMarketList(
+  stored: string[] | null,
+  provider: OddsProvider,
+  storedVersion: number,
+): string[] | null {
+  if (storedVersion >= 2 || stored == null || provider !== "propline") return stored
+  // Narrower than what a blank box would have pulled, on any league it could
+  // apply to: a basketball list narrows the NBA, a football list the NFL.
+  const narrows = LEAGUE_IDS.some((id) => {
+    const league = LEAGUES[id]
+    const free = league.deepMarkets ?? league.markets
+    const applies = stored.some((m) => free.includes(m))
+    return applies && free.some((m) => !stored.includes(m))
+  })
+  return narrows ? null : stored
+}
+
+/**
+ * The feed to use when a stored blob names none this app knows.
+ *
+ * NOT simply the current default, and the difference matters: a phone from
+ * before the provider setting existed holds an Odds API key and nothing else,
+ * and handing it the new PropLine default would move it onto a feed it has no
+ * key for and stop it pulling. So the keys it actually holds decide, and the
+ * default only settles an install that holds neither.
+ */
+function providerForKeys(stored: Partial<OddsFeedSettings> | undefined): OddsProvider {
+  if (usableKey(stored?.proplineKey) != null) return "propline"
+  if (usableKey(stored?.apiKey) != null) return "theoddsapi"
+  return DEFAULT_ODDS_FEED.provider
+}
+
 function migrateOddsFeed(stored: Partial<OddsFeedSettings> | undefined): OddsFeedSettings {
   const base = { ...DEFAULT_ODDS_FEED, ...(stored ?? {}) }
-  const merged = { ...base, provider: ODDS_PROVIDERS.includes(base.provider) ? base.provider : DEFAULT_ODDS_FEED.provider }
+  // Tested against what was STORED, not against base: base has already had the
+  // current default merged in, so asking it whether the provider is known
+  // always says yes and the key-aware fallback would never run.
+  const chosen = stored?.provider
+  const merged = {
+    ...base,
+    provider: chosen != null && ODDS_PROVIDERS.includes(chosen) ? chosen : providerForKeys(stored),
+  }
   const b = stored?.bettable
   const untouched =
     Array.isArray(b) && b.length === OLD_DEFAULT_BETTABLE.length && OLD_DEFAULT_BETTABLE.every((id) => b.includes(id))
@@ -622,7 +823,15 @@ function migrateLines(raw: unknown): LineSnapshot[] {
         Array.isArray(snap.rows)
       )
     })
-    .map((snap) => ({ ...snap, rows: snap.rows.filter(isLineSnapshotRow).slice(0, MAX_SNAPSHOT_ROWS) }))
+    .map((snap) => {
+      const rows = snap.rows.filter(isLineSnapshotRow)
+      const kept = rankSnapshotRows(rows).slice(0, MAX_SNAPSHOT_ROWS)
+      // A snapshot written before the cap, or by an older build that sliced in
+      // arrival order, is re-chosen by the same stable ranking as a fresh one,
+      // so an upgraded install's old pulls still pair with its new ones.
+      const dropped = (snap.truncated ?? 0) + (rows.length - kept.length)
+      return { ...snap, rows: kept, ...(dropped > 0 ? { truncated: dropped } : {}) }
+    })
     .sort((a, b) => b.pulledAt.localeCompare(a.pulledAt))
     .slice(0, MAX_LINE_SNAPSHOTS)
 }

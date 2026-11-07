@@ -50,6 +50,7 @@ import {
   leagueFor,
   type LeagueConfig,
   type LeagueId,
+  maxGamesFor,
 } from "@/lib/leagues"
 
 export const runtime = "nodejs"
@@ -176,7 +177,13 @@ export async function POST(request: Request) {
   // companion always uses its own list. Resolved per competition below.
   const bookmakers = body.bookmakers?.length ? body.bookmakers : league.books
   const regions = body.regions || "us,us2,eu"
-  const maxGames = Math.max(1, Math.min(body.maxGames ?? league.maxGames, 20))
+  // The league default is feed-aware: a game costs a whole market list on The
+  // Odds API and a single request on PropLine, so the two feeds do not want
+  // the same cap. An explicit cap from the body still wins.
+  const maxGames = Math.max(
+    1,
+    Math.min(body.maxGames ?? maxGamesFor(league, { billsPerRequest: provider === "propline" }), 20),
+  )
 
   // Default window: from now to 30 hours out, which covers a whole slate
   // regardless of the caller's timezone.
@@ -212,7 +219,7 @@ export async function POST(request: Request) {
           // The league's own cap is the dial on the Today screen; a companion
           // keeps the cap sized to its own slate, because a Saturday lists
           // fifty college games and only a handful carry real prop pricing.
-          maxGames: comp.id === leagueId ? maxGames : comp.maxGames,
+          maxGames: comp.id === leagueId ? maxGames : maxGamesFor(comp),
           markets: marketsForCompetition(comp, body.markets),
           regions,
           bookmakers,
@@ -653,7 +660,7 @@ async function fromPropline(args: PullArgs & { eventsOnly: boolean }) {
           // not be able to take the league offline.
           markets: marketsForCompetition(comp, args.markets, { billsPerRequest: true }),
           coreMarkets: marketsForCompetition(comp, args.markets),
-          maxGames: comp.id === args.leagueId ? args.maxGames : comp.maxGames,
+          maxGames: comp.id === args.leagueId ? args.maxGames : maxGamesFor(comp, { billsPerRequest: true }),
         }),
       })),
     )

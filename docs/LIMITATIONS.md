@@ -277,6 +277,15 @@ claim is marked unverified in the code with the one-request experiment that woul
 (compare `x-requests-last` with and without a market the game does not post). No behaviour depends
 on the answer: market lists are trimmed because an unpriced prop is a worse board.
 
+**The game cap drops the latest game, not the worst one.** Only a depth-ranked competition
+chooses which games to spend its cap on, and college football is the only one. Everywhere else the
+slate is taken in start order, so any cap below the slate size is a time filter wearing a budget's
+clothing: on the NBA it removes the late West Coast tip and keeps an early game nobody prices
+deeply. This is why the NBA's per-request cap is the whole slate — 15 games for 16 of PropLine's
+1,000 daily requests — and why lowering the cap to save money on The Odds API costs more than it
+looks. A credit budget is a reason to ask for fewer markets; it is a poor reason to ask for fewer
+games.
+
 **The depth ranking is a proxy, not a measurement.** How many books hang a spread on a game stands
 in for how deep its player-prop market will be. They correlate, because both follow television,
 but the only direct answer costs a credit per game and so defeats the purpose. The 21-point
