@@ -51,12 +51,22 @@ itself, and it says so. The comparison is against the estimate for the requests 
 completed, so one failed game cannot read as an answer. A request that reports no cost counts as
 unmeasured, never as free: the total is then called a floor rather than quoted as a sum.
 
-**Two feeds can price the slate.** [The Odds API](https://the-odds-api.com) carries Pinnacle's
-player props and bills per market per game against 500 credits a month.
-[PropLine](https://prop-line.com) bills per request against 1,000 a day and also carries the
-lines **PrizePicks and Underdog are actually posting**. Pick the provider under Settings → Odds
-feed. A PropLine key also works alongside The Odds API: Pinnacle prices the props, PropLine
-supplies the pick'em apps' lines, and the pick'em entry is built at the line your app shows.
+**Two feeds can price the slate, and PropLine is the default.**
+[PropLine](https://prop-line.com) bills per request against 1,000 a day — one per game whatever
+the market list, so width is free and a full NBA night is 16 requests — and carries the lines
+**PrizePicks and Underdog are actually posting**, which is what a pick'em entry has to be built
+at. [The Odds API](https://the-odds-api.com) is the sharper of the two and the only one carrying
+Pinnacle's player props, but it bills per market per game against 500 credits a month: a full NBA
+night at five markets is 70, about seven presses. So PropLine pulls the slate every night and The
+Odds API answers "what does Pinnacle say about this one prop". Pick the provider under
+Settings → Odds feed. A PropLine key also works alongside The Odds API: Pinnacle prices the
+props, PropLine supplies the pick'em apps' lines, and the pick'em entry is built at the line your
+app shows.
+
+What PropLine costs is Pinnacle: it carries no Pinnacle player props, so the sharp reference
+behind a prop there is BetOnline and LowVig, and those count as one book. That is why **Require
+sharp reference** stays on, and why a prop no market maker priced is held to the lesser of the
+consensus and the retail books' own number.
 
 ## Running it
 
@@ -124,8 +134,11 @@ stands.
 
 ### The API key
 
-The app needs sportsbook prices. Get a key from
-[the-odds-api.com](https://the-odds-api.com) (the free tier is 500 requests a month).
+The app needs sportsbook prices. Get a key from [prop-line.com](https://prop-line.com) (free,
+1,000 requests a day). That is the default feed and the one to get first: it bills one request
+per game whatever the market list, so a full NBA night is 16 requests of the 1,000 and the whole
+eleven-market board comes back for the price of four — and it carries the lines PrizePicks and
+Underdog are really posting, which is what a pick'em entry has to be built at.
 
 The simplest place for it is **Settings → Odds feed** in the running app: paste it there and
 it is kept in your browser. To keep it in a file instead, copy the example file and put the
@@ -140,9 +153,15 @@ precedence over one in Settings. Avoid `echo KEY=... > .env.local` in Windows
 PowerShell 5: it writes the file as UTF-16, and the key in it is never read. Without a
 working key the app has no prices, and it will say so rather than invent an edge.
 
-Optionally add a [PropLine](https://prop-line.com) key (free, 1,000 requests a day) to read the
-pick'em apps' own lines, or to price the whole slate from PropLine instead. It goes in the
-same Settings tab, or on the `PROPLINE_API_KEY=` line of `.env.local`.
+Optionally add an [Odds API](https://the-odds-api.com) key (free tier: 500 requests a
+month) as well. It is the sharper of the two and the only feed here carrying **Pinnacle's**
+player props, which dominate a consensus by design — but it bills per market per game, so a full
+NBA night at five markets is 70 of the 500, about seven presses. Keep it for a Pinnacle read on a
+prop you are about to bet rather than for pulling a slate every night. It goes in the same
+Settings tab, or on the `ODDS_API_KEY=` line of `.env.local`.
+
+With one key set the app selects that feed on first run; with both, PropLine. Nothing moves a
+phone onto a feed it has no key for.
 
 The same caution about public deployments applies: leave `PROPLINE_API_KEY` unset on an
 unprotected URL and enter the key in Settings instead.

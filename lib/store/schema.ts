@@ -8,15 +8,21 @@ import type { PickemLine } from "@/lib/odds-feed/propline"
 import {
   DEFAULT_LEAGUE,
   LEAGUES,
+  LEAGUE_IDS,
   isLeagueId,
   leagueFor,
   reseedGameCap,
   type LeagueId,
   type LoggedLeagueId,
 } from "@/lib/leagues"
+import { usableKey } from "@/lib/odds-feed/api-key"
 import { PICKEM_MAX_PROB } from "@/lib/today/build"
 
-export const STATE_VERSION = 1
+/**
+ * 2 moved the default feed to PropLine and stopped a stored market list
+ * narrowing a feed that does not charge for width. See migrate().
+ */
+export const STATE_VERSION = 2
 
 export interface BankrollSettings {
   bankroll: number
@@ -76,7 +82,28 @@ export interface OddsFeedSettings {
 }
 
 export const DEFAULT_ODDS_FEED: OddsFeedSettings = {
-  provider: "theoddsapi",
+  /**
+   * PropLine, because the binding constraint on a daily board is how often you
+   * can pull it, not how sharp one price is.
+   *
+   * The Odds API carries Pinnacle, which is the strongest reference there is
+   * and dominates a consensus by design. It also bills markets x games against
+   * 500 credits a month: a full NBA night at five markets is 70, so about seven
+   * presses, and a season is 165 days. There is no setting that makes that a
+   * daily board. PropLine bills one request per game whatever the market list,
+   * so the same night is 16 of 1,000 a day, the whole eleven-market board comes
+   * back for the price of four, and it carries the lines PrizePicks and
+   * Underdog are really posting -- which is what an entry has to be built at.
+   *
+   * What it costs is Pinnacle: PropLine carries no Pinnacle player props, so
+   * the sharp reference behind a prop there is BetOnline and LowVig, which
+   * count as one book. That is why requireSharpReference stays on and why a
+   * prop no market maker priced is held to the lesser of the consensus and the
+   * retail books' own number. The Odds API is still the right feed for a
+   * Pinnacle read on a prop you are about to bet; it is the wrong one for
+   * pulling a slate every night.
+   */
+  provider: "propline",
   apiKey: "",
   proplineKey: "",
   pickemLines: true,
@@ -587,7 +614,8 @@ export function migrate(raw: unknown): AppState {
   if (!raw || typeof raw !== "object") return EMPTY_STATE
   const o = raw as Partial<AppState>
   const s = (o.settings ?? {}) as Partial<AppSettings>
-  const oddsFeed = migrateOddsFeed(s.oddsFeed)
+  const storedVersion = typeof o.version === "number" ? o.version : 0
+  const oddsFeed = migrateToProplineDefault(migrateOddsFeed(s.oddsFeed), storedVersion)
   const dailyLeague = isLeagueId(s.daily?.league) ? s.daily.league : DEFAULT_LEAGUE
   const storedCap = typeof s.daily?.maxGames === "number" ? s.daily.maxGames : DEFAULT_DAILY.maxGames
   return {
@@ -605,6 +633,7 @@ export function migrate(raw: unknown): AppState {
         maxGames: reseedGameCap(leagueFor(dailyLeague), storedCap, {
           billsPerRequest: oddsFeed.provider === "propline",
         }),
+        markets: migrateMarketList(s.daily?.markets ?? null, oddsFeed.provider, storedVersion),
         underMargin: cleanMargins(s.daily?.underMargin),
       },
       oddsFeed,
@@ -656,9 +685,83 @@ function migrateCapturedPayouts(raw: unknown): Record<string, CapturedPayout> {
  * A bettable list still at the old five-book default was never chosen, so it
  * moves to the new one. A list someone edited is theirs and is kept.
  */
+/**
+ * Move an install that never chose a feed onto the new default.
+ *
+ * Runs once, for a blob written before STATE_VERSION 2. Guarded two ways,
+ * because getting this wrong does not cost a preference, it stops the app
+ * pulling at all: the install must still be on the OLD default, so a feed
+ * anybody picked on purpose is left alone, and it must already hold a usable
+ * PropLine key, so nobody is moved onto a feed that cannot answer. A key set
+ * only as PROPLINE_API_KEY in the environment is invisible here, so those
+ * installs stay where they are and can switch in Settings in one click --
+ * the conservative way round.
+ */
+function migrateToProplineDefault(feed: OddsFeedSettings, storedVersion: number): OddsFeedSettings {
+  if (storedVersion >= 2) return feed
+  if (feed.provider !== "theoddsapi") return feed
+  if (usableKey(feed.proplineKey) == null) return feed
+  return { ...feed, provider: "propline" }
+}
+
+/**
+ * Clear a stored market list that is costing markets for nothing.
+ *
+ * A list is a budget on a feed billed per market per game, and someone who
+ * narrowed The Odds API to stay under their quota meant it -- that list
+ * survives. On PropLine the same list buys nothing: width is free, one request
+ * per game whatever is asked for, so a four-market list holds the NBA to four
+ * of eleven and every market left out is a pick'em line that cannot be read.
+ * Since an entry is built only at lines an app is really posting, those are
+ * legs that cannot be played.
+ *
+ * So this clears a list once, for a blob written before STATE_VERSION 2, and
+ * only when the install is on a per-request feed and the list is narrower than
+ * that feed's free board. A list that already covers the board is not
+ * narrowing anything and is left as it is.
+ */
+function migrateMarketList(
+  stored: string[] | null,
+  provider: OddsProvider,
+  storedVersion: number,
+): string[] | null {
+  if (storedVersion >= 2 || stored == null || provider !== "propline") return stored
+  // Narrower than what a blank box would have pulled, on any league it could
+  // apply to: a basketball list narrows the NBA, a football list the NFL.
+  const narrows = LEAGUE_IDS.some((id) => {
+    const league = LEAGUES[id]
+    const free = league.deepMarkets ?? league.markets
+    const applies = stored.some((m) => free.includes(m))
+    return applies && free.some((m) => !stored.includes(m))
+  })
+  return narrows ? null : stored
+}
+
+/**
+ * The feed to use when a stored blob names none this app knows.
+ *
+ * NOT simply the current default, and the difference matters: a phone from
+ * before the provider setting existed holds an Odds API key and nothing else,
+ * and handing it the new PropLine default would move it onto a feed it has no
+ * key for and stop it pulling. So the keys it actually holds decide, and the
+ * default only settles an install that holds neither.
+ */
+function providerForKeys(stored: Partial<OddsFeedSettings> | undefined): OddsProvider {
+  if (usableKey(stored?.proplineKey) != null) return "propline"
+  if (usableKey(stored?.apiKey) != null) return "theoddsapi"
+  return DEFAULT_ODDS_FEED.provider
+}
+
 function migrateOddsFeed(stored: Partial<OddsFeedSettings> | undefined): OddsFeedSettings {
   const base = { ...DEFAULT_ODDS_FEED, ...(stored ?? {}) }
-  const merged = { ...base, provider: ODDS_PROVIDERS.includes(base.provider) ? base.provider : DEFAULT_ODDS_FEED.provider }
+  // Tested against what was STORED, not against base: base has already had the
+  // current default merged in, so asking it whether the provider is known
+  // always says yes and the key-aware fallback would never run.
+  const chosen = stored?.provider
+  const merged = {
+    ...base,
+    provider: chosen != null && ODDS_PROVIDERS.includes(chosen) ? chosen : providerForKeys(stored),
+  }
   const b = stored?.bettable
   const untouched =
     Array.isArray(b) && b.length === OLD_DEFAULT_BETTABLE.length && OLD_DEFAULT_BETTABLE.every((id) => b.includes(id))
