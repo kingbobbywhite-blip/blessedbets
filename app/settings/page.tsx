@@ -291,7 +291,13 @@ export default function SettingsPage() {
                       onClick={() =>
                         setSettings((prev) => ({
                           ...prev,
-                          oddsFeed: { ...prev.oddsFeed, provider: p.id },
+                          oddsFeed: {
+                            ...prev.oddsFeed,
+                            provider: p.id,
+                            // A choice, so there is no longer a guess of the
+                            // app's own to undo. See autoMovedToPropline.
+                            autoMovedToPropline: false,
+                          },
                           // The game cap follows the feed when it was only the
                           // other feed's default, and stays put when it was
                           // chosen. PropLine bills per request, so a cap sized

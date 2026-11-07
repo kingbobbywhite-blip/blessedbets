@@ -82,6 +82,21 @@ export interface OddsFeedSettings {
   bettable: string[]
   /** Regions parameter for the feed. */
   regions: string
+  /**
+   * True when an upgrade moved this install to PropLine on its own, rather
+   * than anyone choosing it.
+   *
+   * The move is guarded on a stored PropLine key, but a key being present and
+   * not a placeholder is not the same as PropLine accepting it, and nothing
+   * offline can tell the two apart. So an install holding a dud key was moved
+   * onto a feed that refuses every request, which is worse than where it
+   * started: it had a working Odds API key and now pulls nothing at all.
+   *
+   * This marks a move the app made so the app can undo it, once, on the one
+   * error that proves it was wrong. A provider the user picks is never
+   * flagged and so is never undone -- the app only reverses its own guess.
+   */
+  autoMovedToPropline?: boolean
 }
 
 export const DEFAULT_ODDS_FEED: OddsFeedSettings = {
@@ -747,7 +762,9 @@ function migrateToProplineDefault(feed: OddsFeedSettings, storedVersion: number)
   if (storedVersion >= 2) return feed
   if (feed.provider !== "theoddsapi") return feed
   if (usableKey(feed.proplineKey) == null) return feed
-  return { ...feed, provider: "propline" }
+  // Flagged, so a PropLine that refuses the key can put this back. See
+  // autoMovedToPropline.
+  return { ...feed, provider: "propline", autoMovedToPropline: true }
 }
 
 /**
