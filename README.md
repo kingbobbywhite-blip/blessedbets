@@ -10,9 +10,10 @@ Add a book under Settings if you open an account there.
 
 Two tabs: **NBA** and **NFL**, with the NBA the one the board is built for. **College football
 rides inside the NFL tab**, off by default: turn the switch on under Settings → Today and one press
-pulls both, each priced with its own numbers, with a college row badged CFB wherever it appears —
-and because that press costs 80 credits rather than 56, the button asks before spending it. Each tab
-keeps its own cached pull, so switching never throws away a slate you already paid feed credits for.
+pulls both, each priced with its own numbers, with a college row badged CFB wherever it appears.
+On PropLine that is six more requests of the daily 1,000; on The Odds API it takes the press from 56
+credits to 80, and the button asks before spending it. Each tab keeps its own cached pull, so
+switching never throws away a slate you already paid for.
 
 The NHL was removed. Nothing pulls or prices it; a logged NHL entry still reads back off a
 screenshot and still settles, because its stats are hockey's and a read that forgot that would
