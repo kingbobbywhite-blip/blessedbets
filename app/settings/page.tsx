@@ -15,7 +15,7 @@ import { DEVIG_METHODS, type DevigMethod } from "@/lib/quant/odds"
 import { payoutMultiple, payoutVerified, supportedPickCounts } from "@/lib/quant/payouts"
 import { exportState, importState } from "@/lib/store/local"
 import { useStore } from "@/lib/store/provider"
-import { companionsOf, creditPlan, leagueFor, pullPlan, reseedGameCap } from "@/lib/leagues"
+import { companionsOf, creditPlan, leagueFor, maxGamesFor, pullPlan, reseedGameCap } from "@/lib/leagues"
 import { marketsForCompetition, marketsForLeague } from "@/lib/odds-feed/theoddsapi"
 import { DEFAULT_SETTINGS, type OddsProvider } from "@/lib/store/schema"
 import { money } from "@/lib/format"
@@ -454,12 +454,33 @@ export default function SettingsPage() {
                     <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
                       {companions.map((l) => l.label).join(" and ")} {companions.length === 1 ? "is" : "are"} the
                       same sport in the same week, so {companions.length === 1 ? "it rides" : "they ride"} inside
-                      this section rather than taking a tab. Off by default because it costs credits on top of the{" "}
-                      {dailyLeague.label} slate: {companions.map((l) => `${l.maxGames} games at ${l.markets.length} markets`).join(", ")}, so about{" "}
-                      {companions.reduce((a, l) => a + l.maxGames * l.markets.length, 0)} more per press. Each is
-                      priced with its own numbers and badged on every row. Turning it off keeps the games you have
-                      already paid for in this browser&apos;s cache and only leaves them out of the picks, so you
-                      can turn it back on without spending anything.
+                      this section rather than taking a tab. Off by default because it is not free:{" "}
+                      {billsPerRequest ? (
+                        <>
+                          on PropLine{" "}
+                          {companions
+                            .map((l) => `${maxGamesFor(l, { billsPerRequest })} more games`)
+                            .join(", ")}
+                          , so {companions.reduce((a, l) => a + maxGamesFor(l, { billsPerRequest }), 0)} more
+                          requests of the 1,000 a day, whatever the markets.
+                        </>
+                      ) : (
+                        <>
+                          it costs credits on top of the {dailyLeague.label} slate:{" "}
+                          {companions
+                            .map((l) => `${maxGamesFor(l)} games at ${marketsForCompetition(l, s.daily.markets).length} markets`)
+                            .join(", ")}
+                          , so about{" "}
+                          {companions.reduce(
+                            (a, l) => a + maxGamesFor(l) * marketsForCompetition(l, s.daily.markets).length,
+                            0,
+                          )}{" "}
+                          more per press.
+                        </>
+                      )}{" "}
+                      Each is priced with its own numbers and badged on every row. Turning it off keeps the games
+                      you have already paid for in this browser&apos;s cache and only leaves them out of the picks,
+                      so you can turn it back on without spending anything.
                     </p>
                   </div>
                   <Switch
