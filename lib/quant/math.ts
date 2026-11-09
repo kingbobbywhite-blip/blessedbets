@@ -1,5 +1,5 @@
 /**
- * Numerical primitives for the WagerWise probability engine.
+ * Numerical primitives for the BlessedBets probability engine.
  * Everything here is pure, deterministic and dependency-free so it can be
  * unit-tested and run identically on the server and in the browser.
  */

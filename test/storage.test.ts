@@ -176,3 +176,36 @@ describe("the game cap across a feed change", () => {
     }
   })
 })
+
+describe("the rename to BlessedBets", () => {
+  // The app's name changed; the addresses its data lives under must not. An
+  // install's settings, slips, tracker history and line history are stored
+  // under these two names, so renaming either opens an empty store on the next
+  // load and strands everything in the old one. These are tripwires for a
+  // well-meant cleanup that "finishes" the rename.
+  afterEach(() => vi.unstubAllGlobals())
+
+  it("still reads an existing install's data from the original localStorage key", async () => {
+    const { loadState } = await import("@/lib/store/local")
+    const stored = migrate({ version: 3, settings: { daily: { league: "nba", minEdge: 0.07 } } })
+    const store: Record<string, string> = { "wagerwise.state.v1": JSON.stringify(stored) }
+    vi.stubGlobal("window", {
+      localStorage: { getItem: (k: string) => store[k] ?? null, setItem: (k: string, v: string) => (store[k] = v) },
+    })
+    // 0.07 is not a default, so reading it back proves the old key was found.
+    expect(loadState().settings.daily.minEdge).toBe(0.07)
+  })
+
+  it("still opens the original IndexedDB database", async () => {
+    const opened: string[] = []
+    vi.stubGlobal("indexedDB", {
+      open: (name: string) => {
+        opened.push(name)
+        throw new Error("stubbed: only the name is under test")
+      },
+    })
+    const { openPartStore } = await import("@/lib/store/idb")
+    await expect(openPartStore()).rejects.toThrow("stubbed")
+    expect(opened).toEqual(["wagerwise"])
+  })
+})

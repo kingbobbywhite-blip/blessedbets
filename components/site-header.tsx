@@ -16,7 +16,7 @@ export function SiteHeader() {
             <Activity className="size-4" aria-hidden />
           </span>
           <div className="flex items-baseline gap-2">
-            <span className="font-mono text-sm font-semibold tracking-tight">WagerWise</span>
+            <span className="font-mono text-sm font-semibold tracking-tight">BlessedBets</span>
             <span className="hidden font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground sm:inline">
               {LEAGUE_IDS.map((id) => LEAGUES[id].short).join(" · ")}
             </span>

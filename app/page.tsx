@@ -42,7 +42,7 @@ import {
 import type { FeedQuote } from "@/lib/quant/valuebets"
 import { buildPickemEntry, hasAppLines, pickemPlays, sideBars, upcomingQuotes } from "@/lib/today/build"
 import { useDailyPicks, type PickInputs } from "@/hooks/use-daily-picks"
-import { snapshotFor } from "@/lib/quant/lines"
+import { lineChanges, snapshotFor } from "@/lib/quant/lines"
 import { entryExpectation } from "@/lib/tracker/entries"
 import { marketsForCompetition } from "@/lib/odds-feed/theoddsapi"
 import { PROPLINE_FREE_DAILY } from "@/lib/odds-feed/propline"
@@ -138,6 +138,12 @@ export default function TodayPage() {
   // Only ever show the cache belonging to the league on screen. Rendering an
   // NBA pull under an NFL heading would be worse than showing nothing.
   const daily = state.daily[leagueId] ?? null
+  // How the books moved each prop since an earlier pull of the same game,
+  // anchored on the pull on screen so two older pulls are never compared.
+  const lineMovement = React.useMemo(
+    () => lineChanges(state.lines, leagueId, daily?.fetchedAt),
+    [state.lines, leagueId, daily?.fetchedAt],
+  )
   // Only games still to start are worth a pick; the rest of the pull is kept,
   // so this undoes itself if the clock was wrong.
   const upcoming = React.useMemo(() => {
@@ -1068,6 +1074,9 @@ export default function TodayPage() {
                     : !bar.verified
                       ? ` That bar is read off a payout table nobody has confirmed, so the line between a target and a pass is softer than it looks.`
                       : ""}
+                  {lineMovement.size > 0
+                    ? ` Where an earlier pull saw the same game, a row shows how the books' line has moved since, and says when your app's line still sits nearer where the books were. That is the shape of a stale line, the edge this app counts as real; the chance already prices the gap, and an app tends to correct a stale line, so it is worth acting on sooner rather than later.`
+                    : ""}
                   {wantPickem && daily?.pickemNote ? ` ${daily.pickemNote}` : ""}
                 </p>
                 <div
@@ -1089,7 +1098,14 @@ export default function TodayPage() {
                     </thead>
                     <tbody>
                       {shownTargets.map((t) => (
-                        <DfsTargetRow key={t.key} t={t} bar={bars} app={s.defaultAppId} />
+                        <DfsTargetRow
+                          key={t.key}
+                          t={t}
+                          bar={bars}
+                          app={s.defaultAppId}
+                          move={lineMovement.get(`${t.key}|${t.commenceTime ?? ""}`)}
+                          now={now}
+                        />
                       ))}
                     </tbody>
                   </table>

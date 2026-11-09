@@ -21,6 +21,18 @@ import type { AppState } from "./schema"
  * its own instead of taking the settings and slips down with it.
  */
 
+/**
+ * The database's name, which is NOT the app's name and must not follow it.
+ *
+ * The app was called WagerWise when this was written and is BlessedBets now.
+ * This string is the address every install's settings, slips, tracker history
+ * and line history are stored under, so changing it opens a fresh, empty
+ * database on the next load and the data is stranded in the old one. Settled
+ * history is the only evidence in this app that can show the model is wrong,
+ * and losing it to a rename would be the worst trade available. A migration
+ * could copy it across, but would have to keep this string anyway to find the
+ * old data, so it would add risk to every load without removing the name.
+ */
 const DB_NAME = "wagerwise"
 const DB_VERSION = 1
 const STORE = "state"

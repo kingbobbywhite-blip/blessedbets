@@ -8,6 +8,7 @@ import { CompetitionBadge } from "@/components/competition-badge"
 import { pct, possessive } from "@/lib/format"
 import { DEFAULT_APPS, findApp } from "@/lib/quant/payouts"
 import { appVerdict, barFor, dfsVerdict, probAt, pushAt, type AppLine, type DfsTarget, type SideBars } from "@/lib/today/build"
+import { appIsBehind, sinceLabel, type LineChange } from "@/lib/quant/lines"
 
 /** "PrizePicks 24.5 over 58%", or the flavour and multiplier when the pick is not standard. */
 function describeAppLine(l: AppLine): string {
@@ -34,7 +35,25 @@ function describeAppLine(l: AppLine): string {
  * pick is named, so a discounted Underdog side reads as a pass with its reason.
  * Typing a different number still overrides it.
  */
-export function DfsTargetRow({ t, bar, app }: { t: DfsTarget; bar: number | SideBars; app?: string | null }) {
+export function DfsTargetRow({
+  t,
+  bar,
+  app,
+  move,
+  now,
+}: {
+  t: DfsTarget
+  bar: number | SideBars
+  app?: string | null
+  /** How the books' line moved since an earlier pull of this game, if it did. */
+  move?: LineChange
+  /**
+   * The page's clock, for "3h ago". Passed in rather than read here, because a
+   * component that reads the clock while rendering renders differently each
+   * time for the same props. Without it the age is simply left off.
+   */
+  now?: number
+}) {
   // One bar per side: an under may carry a margin the over does not.
   const bars: SideBars = typeof bar === "number" ? { over: bar, under: bar } : bar
   const atApp = app ? appVerdict(t, app, bars) : null
@@ -98,6 +117,18 @@ export function DfsTargetRow({ t, bar, app }: { t: DfsTarget; bar: number | Side
           <CompetitionBadge competition={t.competition} />
         </div>
         <div className="font-mono text-[10px] text-muted-foreground">{t.gameId.replace("@", " at ")}</div>
+        {move ? (
+          <div className="font-mono text-[10px] text-muted-foreground">
+            books {move.from} → {move.to} ({move.delta > 0 ? "▲" : "▼"}
+            {Math.abs(move.delta)}){now != null ? ` ${sinceLabel(move.since, now)}` : ""}
+            {atApp && appIsBehind(move, atApp.line) ? (
+              <span className="text-accent">
+                {" "}
+                · {appLabel} {atApp.line} is behind the move
+              </span>
+            ) : null}
+          </div>
+        ) : null}
         {t.warnings?.map((w) => (
           <div key={w} className="mt-0.5 flex max-w-xs items-start gap-1 text-[10px] leading-snug text-accent">
             <TriangleAlert className="mt-0.5 size-2.5 shrink-0" />
