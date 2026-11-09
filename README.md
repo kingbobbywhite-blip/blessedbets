@@ -1,4 +1,4 @@
-# WagerWise
+# BlessedBets
 
 A basketball and football tool for deciding which props and parlays are worth betting, built
 around the apps in your rotation: PrizePicks, Underdog, Sleeper, Real and Winible for pick'em, FanDuel

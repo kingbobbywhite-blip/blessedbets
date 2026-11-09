@@ -14,6 +14,11 @@ import { EMPTY_STATE, migrate, type AppState } from "./schema"
  * written to only where IndexedDB cannot be opened at all.
  */
 
+/**
+ * The storage key: an address, not the app's name. Kept through the rename to
+ * BlessedBets for the same reason as DB_NAME in ./idb -- changing it strands
+ * every install's data under the old key.
+ */
 const KEY = "wagerwise.state.v1"
 
 export function loadState(): AppState {

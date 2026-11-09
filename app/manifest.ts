@@ -10,8 +10,8 @@ import type { MetadataRoute } from "next"
  */
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "WagerWise — Prop Terminal",
-    short_name: "WagerWise",
+    name: "BlessedBets — Prop Terminal",
+    short_name: "BlessedBets",
     description:
       "NBA, NFL and college football prop and parlay analysis: devigged fair lines, calibrated probabilities and expected value.",
     start_url: "/",
