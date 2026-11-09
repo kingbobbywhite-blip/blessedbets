@@ -77,8 +77,8 @@ Node 20 reached end of life in April 2026 and no longer gets security fixes, so 
 stop with an `EBADENGINE` error rather than install on it.
 
 ```bash
-git clone https://github.com/kingbobbywhite-blip/wagerwise.git
-cd wagerwise
+git clone https://github.com/kingbobbywhite-blip/blessedbets.git
+cd blessedbets
 npm ci
 npm run dev
 ```
@@ -98,6 +98,14 @@ anyway, start it with `npx next dev -H 0.0.0.0`, and only on a network you trust
 git pull origin main
 npm ci
 npm run dev
+```
+
+The repository was renamed from `wagerwise` to `blessedbets`. A clone made before that keeps
+pulling and pushing, because GitHub forwards the old name, but it is worth pointing it at the
+new one so nothing depends on the forwarding:
+
+```bash
+git remote set-url origin https://github.com/kingbobbywhite-blip/blessedbets.git
 ```
 
 If a pull aborts with "Your local changes to the following files would be overwritten" and
@@ -124,14 +132,31 @@ rm -rf node_modules && npm ci
 npx vercel --prod
 ```
 
-Leave `ODDS_API_KEY` unset in Vercel unless the deployment is password-protected. A public
-URL with a server-side key lets anyone who finds it spend your feed quota. Entering the key
-in Settings instead keeps it in your own browser.
+**The deployment is private.** Vercel Authentication is on for *All Deployments*, so every
+page and every API route answers a visitor who is not logged into this Vercel team with a
+redirect to Vercel's login, and nothing else. *Standard* protection is not enough here, and
+this was checked rather than assumed: it protects each deployment's generated URL but treats
+the addresses under the project's Domains — including the production `*.vercel.app` one — as
+public, and with it on, the production URL still served the full app and its API to anyone.
+To use the app you sign into Vercel once in that browser; on a phone, that includes the
+home-screen app.
+
+Even so, leave `ODDS_API_KEY` and `PROPLINE_API_KEY` unset in Vercel and enter the keys in
+Settings, which keeps them in your own browser. Protection is a setting someone can turn off;
+a key that was never on the server cannot leak from it.
 
 The feed routes only answer JSON requests from the app's own pages, so another website open
-in your browser cannot spend a key held in `.env.local` through your local server. That does
-not protect a public URL from someone calling it directly, which is why the advice above
-stands.
+in your browser cannot spend a key held in `.env.local` through your local server.
+
+**Every response carries security headers** (`next.config.mjs`). The one that matters most
+is the Content Security Policy's `connect-src 'self'` and `img-src 'self'`: the feed keys
+live in this browser's storage, and under this policy even a script that somehow got onto
+the page could not send one anywhere, because the browser may only talk to this origin — and
+the page never needs to, since every feed call goes through this app's own server routes.
+The policy was checked against every page, the picks worker and a real OCR run with no
+violations, and against a deliberate attempt to send data off-site, which it blocked. Pages
+cannot be framed by another site, the browser is told to deny camera, microphone and
+location, and the framework does not announce itself in a header.
 
 ### The API key
 
