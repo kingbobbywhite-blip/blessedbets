@@ -77,8 +77,8 @@ Node 20 reached end of life in April 2026 and no longer gets security fixes, so 
 stop with an `EBADENGINE` error rather than install on it.
 
 ```bash
-git clone https://github.com/kingbobbywhite-blip/wagerwise.git
-cd wagerwise
+git clone https://github.com/kingbobbywhite-blip/blessedbets.git
+cd blessedbets
 npm ci
 npm run dev
 ```
@@ -98,6 +98,14 @@ anyway, start it with `npx next dev -H 0.0.0.0`, and only on a network you trust
 git pull origin main
 npm ci
 npm run dev
+```
+
+The repository was renamed from `wagerwise` to `blessedbets`. A clone made before that keeps
+pulling and pushing, because GitHub forwards the old name, but it is worth pointing it at the
+new one so nothing depends on the forwarding:
+
+```bash
+git remote set-url origin https://github.com/kingbobbywhite-blip/blessedbets.git
 ```
 
 If a pull aborts with "Your local changes to the following files would be overwritten" and
