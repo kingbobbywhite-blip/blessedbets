@@ -865,10 +865,22 @@ async function pickemFromPropline(
       remaining: results.map((r) => r.pull.quota?.remaining).filter((q) => q != null).pop() ?? null,
     }
   } catch (err) {
+    // On this path The Odds API priced the slate and PropLine only supplies the
+    // pick'em apps' lines, so a refused key here is the PROPLINE key and
+    // nothing else. "PropLine rejected the API key" does not say that, and read
+    // quickly it says "your key is broken": a real install regenerated its Odds
+    // API key twice in answer to it, which cannot help, because the two keys
+    // never cross. So a refused key names which key it is, says the slate is
+    // untouched, and gives both ways out. Other failures -- a rate limit, an
+    // outage -- are not about the key and keep PropLine's sentence alone.
+    const which =
+      err instanceof FeedKeyError
+        ? " This is the PropLine key, not your Odds API key: the slate's prices come from The Odds API and are unaffected. Replace the PropLine key under Settings → Odds feed, or switch off \"Pick'em apps' own lines\" there to stop asking PropLine at all."
+        : ""
     return {
       lines: [],
       appsPosted: [],
-      note: `Pick'em lines unavailable: ${feedErrorText(err, "PropLine")}`,
+      note: `Pick'em lines unavailable: ${feedErrorText(err, "PropLine")}${which}`,
       remaining: null,
     }
   }

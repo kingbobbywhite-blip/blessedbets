@@ -983,3 +983,68 @@ describe("/api/today reporting what the feed charged", () => {
     expect(data.creditNote).toBeNull()
   })
 })
+
+describe("a refused PropLine key on a slate The Odds API priced", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+  })
+
+  /** The Odds API answers normally; PropLine answers with the status given. */
+  function stubBoth(propline: () => Response) {
+    const now = Date.now()
+    const listing = [{ id: "g1", commence_time: iso(now + 3 * HOUR), sport_key: "basketball_nba", home_team: "H", away_team: "A" }]
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes("prop-line.com")) return propline()
+        if (/\/events\/[^/]+\/odds/.test(url)) return json(oddsFor(listing[0]), 200, QUOTA)
+        return json(listing, 200, QUOTA)
+      }),
+    )
+    return now
+  }
+
+  const pull = (now: number) =>
+    today({
+      provider: "theoddsapi",
+      apiKey: "odds-key",
+      proplineKey: "dud-key",
+      pickemLines: true,
+      league: "nba",
+      markets: ["player_points"],
+      from: iso(now - HOUR),
+      to: iso(now + 12 * HOUR),
+      maxGames: 1,
+    })
+
+  it("says which key was refused, because the message used to read as the Odds API key", async () => {
+    // A real install regenerated its Odds API key twice in answer to
+    // "PropLine rejected the API key". The two keys never cross, so that could
+    // not help; the note now says so in as many words.
+    vi.stubEnv("PROPLINE_API_KEY", "")
+    vi.stubEnv("ODDS_API_KEY", "")
+    const now = stubBoth(() =>
+      json({ detail: { error: "invalid_api_key", message: "Invalid API key." } }, 401),
+    )
+    const res = await pull(now)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { pickemNote: string | null; quotes: unknown[] }
+    // The slate itself survived: pick'em lines are a bonus on this path.
+    expect(body.quotes.length).toBeGreaterThan(0)
+    expect(body.pickemNote).toContain("PropLine rejected the API key.")
+    expect(body.pickemNote).toContain("This is the PropLine key, not your Odds API key")
+    expect(body.pickemNote).toContain("unaffected")
+    expect(body.pickemNote).toContain("Pick'em apps' own lines")
+  })
+
+  it("leaves a failure that is not about the key alone", async () => {
+    // A rate limit says nothing about which key is wrong, because none is.
+    vi.stubEnv("PROPLINE_API_KEY", "")
+    vi.stubEnv("ODDS_API_KEY", "")
+    const now = stubBoth(() => json({ detail: { error: "burst_limit_exceeded", message: "Slow down." } }, 429))
+    const body = (await (await pull(now)).json()) as { pickemNote: string | null }
+    expect(body.pickemNote).toContain("Pick'em lines unavailable")
+    expect(body.pickemNote).not.toContain("not your Odds API key")
+  })
+})
