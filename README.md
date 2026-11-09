@@ -232,6 +232,18 @@ one; where they differ, both appear. A line the app posted a while ago says how 
 the apps move them and a stale reading is a guess about the present. Without a key, nothing here
 can see what the apps are offering, so type in the line your app shows.
 
+**How the books' line has moved.** Every pull records the books' consensus line for each prop,
+and where an earlier pull saw the same game, the target row shows the move: *books 23.5 → 25
+(▲1.5) 3h ago*. When your app's line still sits nearer where the books were than where they are,
+the row adds *PrizePicks 23.5 is behind the move*. That is the shape of a stale line, which the
+[limitations](docs/LIMITATIONS.md) name as the edge on these products that is actually real — a
+number the operator has not moved yet. The chance on the row already prices the gap; the move
+says why it is there, and that it may not stay. The line is the books' consensus, not the app's:
+only the books are recorded, so "behind" describes where the app's line sits now, not whether it
+ever moved. It needs two pulls of the same game, compares against the most recent earlier one,
+and is anchored on the pull on screen, so it never presents the gap between two older pulls as
+today's movement.
+
 Either way you get one answer: the over, the under, or pass. Never both. Value bets likewise show
 one side per player and stat: an over at one book and an under at another is a middle, not two
 picks, and on a pick'em app one of the two always loses.

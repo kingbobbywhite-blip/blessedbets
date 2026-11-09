@@ -261,3 +261,96 @@ export function summariseHistory(snapshots: LineSnapshot[]): LineHistorySummary 
     truncated: snapshots.reduce((a, s) => a + (s.truncated ?? 0), 0),
   }
 }
+
+/**
+ * How a prop's consensus line moved between an earlier pull and this one.
+ *
+ * The books' line, not any app's: snapshots record the consensus the books
+ * agree on, which is what moves when the market learns something.
+ */
+export interface LineChange {
+  /** The consensus line at the earlier look. */
+  from: number
+  /** The consensus line now. */
+  to: number
+  /** to - from, in the stat's own units. Never zero: an unmoved line is absent. */
+  delta: number
+  /** When the earlier look was taken (ISO). */
+  since: string
+}
+
+/**
+ * Every prop in the pull on screen that the books have moved since an earlier
+ * pull of the same game, keyed by `${key}|${startsAt}`.
+ *
+ * This is the reason the history is worth showing outside the tracker. The
+ * edge the app's own limitations name as real is a stale line -- a number an
+ * operator has not moved yet -- and the cleanest sign of one is the books
+ * moving while an app's line stays where they used to be. The snapshots have
+ * recorded the books' consensus on every pull all along; this reads it back.
+ *
+ * Anchored on the pull actually displayed, by its exact timestamp. Anything
+ * else risks comparing two older pulls and presenting their difference as
+ * today's movement, so when that pull's snapshot is missing -- not saved, or
+ * shed to fit storage -- the answer is nothing rather than something wrong.
+ * The join is the one lineMoves uses, so the same game played again later in
+ * the season never pairs with this one.
+ */
+export function lineChanges(
+  snapshots: LineSnapshot[],
+  league: LeagueId,
+  currentPulledAt: string | null | undefined,
+): Map<string, LineChange> {
+  const out = new Map<string, LineChange>()
+  if (!currentPulledAt) return out
+  const current = snapshots.find((s) => s.league === league && s.pulledAt === currentPulledAt)
+  if (!current) return out
+
+  // The most recent earlier look at each prop: walk earlier pulls newest
+  // first and keep the first row seen for each join key.
+  const prior = new Map<string, { line: number; pulledAt: string }>()
+  const earlier = snapshots
+    .filter((s) => s.league === league && s.pulledAt < currentPulledAt)
+    .sort((a, b) => b.pulledAt.localeCompare(a.pulledAt))
+  for (const snap of earlier) {
+    for (const row of snap.rows) {
+      if (!Number.isFinite(row.line)) continue
+      const join = `${row.key}|${row.startsAt ?? ""}`
+      if (!prior.has(join)) prior.set(join, { line: row.line, pulledAt: snap.pulledAt })
+    }
+  }
+
+  for (const row of current.rows) {
+    if (!Number.isFinite(row.line)) continue
+    const join = `${row.key}|${row.startsAt ?? ""}`
+    const before = prior.get(join)
+    if (!before) continue
+    const delta = row.line - before.line
+    if (Math.abs(delta) < 1e-9) continue
+    out.set(join, { from: before.line, to: row.line, delta, since: before.pulledAt })
+  }
+  return out
+}
+
+/**
+ * Whether an app's line sits nearer where the books WERE than where they are.
+ *
+ * That is the shape of a stale line: the market moved and this number has not
+ * followed. It says nothing about whether the app moved at all -- only the
+ * books are recorded -- just that its current line is behind the books' move.
+ * The chance on the row already prices the gap; this says why it is there and
+ * that it may not stay.
+ */
+export function appIsBehind(move: LineChange, appLine: number | null | undefined): boolean {
+  if (appLine == null || !Number.isFinite(appLine)) return false
+  return Math.abs(appLine - move.from) < Math.abs(appLine - move.to)
+}
+
+/** "20m ago", "3h ago", "2d ago": how long since the earlier look. */
+export function sinceLabel(since: string, now: number): string {
+  const mins = Math.max(0, (now - Date.parse(since)) / 60_000)
+  if (!Number.isFinite(mins)) return ""
+  if (mins < 60) return `${Math.round(mins)}m ago`
+  if (mins < 48 * 60) return `${Math.round(mins / 60)}h ago`
+  return `${Math.round(mins / (24 * 60))}d ago`
+}
