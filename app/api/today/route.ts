@@ -102,11 +102,12 @@ interface RequestBody {
   eventsOnly?: boolean
 }
 
-function resolveKey(body: RequestBody): string | null {
+/** The Odds API key and where it came from, so a refusal can say which key it was. */
+function resolveKey(body: RequestBody): ResolvedKey | null {
   return resolveApiKey(process.env.ODDS_API_KEY, body.apiKey, {
     env: "ODDS_API_KEY",
-    settings: "Settings \u2192 Odds feed \u2192 API key",
-  })?.key ?? null
+    settings: "Settings \u2192 Odds feed \u2192 The Odds API key",
+  })
 }
 
 /** The empty-slate note, naming games that were skipped for having started. */
@@ -144,7 +145,8 @@ export async function POST(request: Request) {
   const provider = body.provider === "propline" ? "propline" : "theoddsapi"
   const proplineKeySource = resolveProplineKeySource(body.proplineKey)
   const proplineKey = proplineKeySource?.key ?? null
-  const apiKey = resolveKey(body)
+  const apiKeySource = resolveKey(body)
+  const apiKey = apiKeySource?.key ?? null
 
   if (provider === "propline" && !proplineKey) {
     return NextResponse.json(
@@ -216,7 +218,7 @@ export async function POST(request: Request) {
     for (const comp of competitionsFor(leagueId, { companions })) {
       try {
         pulls.push(
-          await pullCompetition(apiKey!, comp, {
+          await pullCompetition(apiKeySource!, comp, {
           // The league's own cap is the dial on the Today screen; a companion
           // keeps the cap sized to its own slate, because a Saturday lists
           // fifty college games and only a handful carry real prop pricing.
@@ -393,7 +395,13 @@ export async function POST(request: Request) {
       fetchedAt: new Date().toISOString(),
     })
   } catch (err) {
-    return NextResponse.json({ error: feedErrorText(err, "The Odds API") }, { status: 502 })
+    // A refused key is not a feed outage: needsKey sends the screen to
+    // Settings instead of inviting a retry that will fail the same way. Still
+    // a 502, as on the PropLine path: it was the feed that refused.
+    return NextResponse.json(
+      { error: feedErrorText(err, "The Odds API"), needsKey: err instanceof FeedKeyError },
+      { status: 502 },
+    )
   }
 }
 
@@ -508,7 +516,7 @@ interface CompetitionPull {
  * the cap. The listing is free; the odds are a credit per market per game.
  */
 async function pullCompetition(
-  apiKey: string,
+  key: ResolvedKey,
   comp: LeagueConfig,
   opts: {
     markets: string[]
@@ -521,8 +529,9 @@ async function pullCompetition(
     eventsOnly: boolean
   },
 ): Promise<CompetitionPull> {
+  const apiKey = key.key
   const billed = emptyCost()
-  const events = await fetchOddsApi<FeedEvent[]>(eventsUrl(apiKey, comp.id))
+  const events = await fetchOddsApi<FeedEvent[]>(eventsUrl(apiKey, comp.id), key)
   if (!Array.isArray(events.data)) throw new SyntaxError("events listing is not a list")
   // The listing is documented as free and is not in the estimate either, so a
   // listing that reports no cost is not a hole in the measurement.
@@ -553,6 +562,7 @@ async function pullCompetition(
     try {
       const bulk = await fetchOddsApi<FeedEventOdds[]>(
         sportOddsUrl(apiKey, comp.id, { markets: ["spreads"], fromMs: opts.fromMs, toMs: opts.toMs }),
+        key,
       )
       depthCredits = 1
       addCost(billed, bulk.last)
@@ -592,6 +602,7 @@ async function pullCompetition(
           bookmakers: opts.bookmakers,
           league: comp.id,
         }),
+        key,
       )
       payloads.push(r.data)
       addCost(billed, r.last)

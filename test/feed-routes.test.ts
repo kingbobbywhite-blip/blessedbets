@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { feedErrorText, headerCount, noneCouldBePriced, notStarted, oddsApiErrorText } from "@/lib/odds-feed/http"
+import {
+  feedErrorText,
+  headerCount,
+  noneCouldBePriced,
+  notStarted,
+  oddsApiErrorText,
+  oddsApiFailure,
+  refusedOddsApiKeyAdvice,
+} from "@/lib/odds-feed/http"
+import { FeedKeyError } from "@/lib/odds-feed/api-key"
 import { narrowedMarketsNote, pullPropline } from "@/lib/odds-feed/propline"
 import { marketCoverageNote, marketsChosen } from "@/lib/odds-feed/theoddsapi"
 import { LEAGUES } from "@/lib/leagues"
@@ -93,6 +102,45 @@ describe("feed request helpers", () => {
     const badKey = json({ message: "API key is not valid.", error_code: "INVALID_KEY" }, 401)
     expect(await oddsApiErrorText(badKey)).toBe("The Odds API rejected the API key. API key is not valid.")
     expect(await oddsApiErrorText(new Response("Bad gateway", { status: 503 }))).toBe("The Odds API returned 503. Bad gateway")
+  })
+
+  it("marks a refused Odds API key as a key problem, and nothing else", async () => {
+    const invalid = () => json({ message: "API key is not valid.", error_code: "INVALID_KEY" }, 401)
+    const refused = await oddsApiFailure(invalid())
+    expect(refused).toBeInstanceOf(FeedKeyError)
+    expect(refused.message).toBe("The Odds API rejected the API key. API key is not valid.")
+    expect(await oddsApiFailure(json({ message: "API key is missing", error_code: "MISSING_KEY" }, 401))).toBeInstanceOf(
+      FeedKeyError,
+    )
+    // A 401 with nothing readable in it is still the feed turning the key away.
+    expect(await oddsApiFailure(new Response("", { status: 401 }))).toBeInstanceOf(FeedKeyError)
+
+    // The same status for a month that is used up, which no key fixes.
+    const spent = await oddsApiFailure(json({ message: "Usage quota has been reached.", error_code: "OUT_OF_USAGE_CREDITS" }, 401))
+    expect(spent).not.toBeInstanceOf(FeedKeyError)
+    expect(spent).toBeInstanceOf(Error)
+    expect(await oddsApiFailure(json({ message: "Slow down." }, 429))).not.toBeInstanceOf(FeedKeyError)
+    expect(await oddsApiFailure(new Response("Bad gateway", { status: 503 }))).not.toBeInstanceOf(FeedKeyError)
+  })
+
+  it("says where a refused Odds API key came from, in place of the feed's advice to get one", async () => {
+    const invalid = () =>
+      json({ message: "API key is not valid. Get an API key at https://the-odds-api.com", error_code: "INVALID_KEY" }, 401)
+    const key = "0123456789abcdef0123456789abcdef"
+    const fromSettings = { key, source: "settings" as const, label: "Settings → Odds feed → The Odds API key" }
+    expect(await oddsApiErrorText(invalid(), fromSettings)).toBe(
+      'The Odds API rejected the API key. API key is not valid. The key sent is the one saved in this browser under Settings → Odds feed → The Odds API key: 32 characters, ending in "cdef". Compare it with the key on your the-odds-api.com account. If that one ends differently, the saved key is out of date; either way, clear that field and paste the current key. Keys are kept per browser and per address the app is opened at, so a key changed on another device or at another address has not changed here.',
+    )
+    const fromEnv = { key, source: "environment" as const, label: "ODDS_API_KEY" }
+    expect(await oddsApiErrorText(invalid(), fromEnv)).toBe(
+      "The Odds API rejected the API key. API key is not valid. The key came from ODDS_API_KEY in the environment, which takes precedence over the one in Settings: correct it there, or remove it to use the key from Settings.",
+    )
+    // With no key to describe there is nothing to put in its place, so the
+    // feed's own sentence stands as it was sent.
+    expect(await oddsApiErrorText(invalid())).toBe(
+      "The Odds API rejected the API key. API key is not valid. Get an API key at https://the-odds-api.com",
+    )
+    expect(refusedOddsApiKeyAdvice(null)).toBe("")
   })
 
   it("says the feed could not be reached instead of 'fetch failed'", () => {
@@ -836,6 +884,137 @@ describe("a PropLine key the feed rejects", () => {
     expect(res.status).toBe(400)
     expect(((await res.json()) as { needsKey?: boolean }).needsKey).toBe(true)
     expect(sent).toHaveLength(0)
+  })
+})
+
+describe("an Odds API key the feed rejects", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+  })
+
+  /** The Odds API's own body for a key it does not recognise, as it sends it. */
+  const INVALID = {
+    message: "API key is not valid. Get an API key at https://the-odds-api.com",
+    error_code: "INVALID_KEY",
+    details_url: "https://the-odds-api.com/liveapi/guides/v4/api-error-codes.html#invalid-key",
+  }
+
+  /** The key on the account page, and one that has been replaced there. Both the shape of a real one. */
+  const CURRENT = "0123456789abcdef0123456789abcdef"
+  const REPLACED = "fedcba9876543210fedcba9876543210"
+
+  /** A feed that knows one key and refuses any other, recording what it was sent. */
+  function stubKnowing(known: string) {
+    const sent: (string | null)[] = []
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const key = new URL(url).searchParams.get("apiKey")
+        sent.push(key)
+        return key === known ? json([], 200, QUOTA) : json(INVALID, 401)
+      }),
+    )
+    return sent
+  }
+
+  for (const [name, call] of [
+    ["/api/today", today],
+    ["/api/odds", odds],
+  ] as const) {
+    it(`${name} says which key it sent, since the account page can say Active while this one is refused`, async () => {
+      // The report: "The Odds API rejected the API key. API key is not valid.
+      // Get an API key at https://the-odds-api.com", from an install whose
+      // account page showed an active key with credits left. Both were true.
+      // The feed answered the account page's key correctly from anywhere else;
+      // what this app held was something other than that key, in a masked
+      // field, and the message gave no way to find that out.
+      vi.stubEnv("ODDS_API_KEY", "")
+      const sent = stubKnowing(CURRENT)
+      const res = await call({ provider: "theoddsapi", apiKey: REPLACED, league: "nba" })
+      const body = (await res.json()) as { error: string; needsKey?: boolean }
+      expect(sent[0]).toBe(REPLACED)
+      // The feed refused this server's request, so 502, and the screen offers Settings.
+      expect(res.status).toBe(502)
+      expect(body.needsKey).toBe(true)
+      expect(body.error).toContain("The Odds API rejected the API key. API key is not valid.")
+      expect(body.error).toContain("saved in this browser under Settings → Odds feed → The Odds API key")
+      expect(body.error).toContain('32 characters, ending in "3210"')
+      expect(body.error).toContain("paste the current key")
+      // Recognisable, not usable: the ending and nothing more.
+      expect(body.error).not.toContain(REPLACED)
+      expect(body.error).not.toContain(REPLACED.slice(-5))
+      // Not the feed's advice to go and get a key: a new key changes nothing
+      // while the old one is still what gets sent.
+      expect(body.error).not.toContain("Get an API key")
+    })
+  }
+
+  it("names the environment when that is where the refused key came from, and describes nothing of it", async () => {
+    // The other way to hold the wrong key with the right one on screen: a
+    // stale ODDS_API_KEY outranks Settings, so retyping the key changes nothing.
+    vi.stubEnv("ODDS_API_KEY", REPLACED)
+    const sent = stubKnowing(CURRENT)
+    const res = await today({ provider: "theoddsapi", apiKey: CURRENT, league: "nba" })
+    const body = (await res.json()) as { error: string; needsKey?: boolean }
+    expect(sent[0]).toBe(REPLACED)
+    expect(body.needsKey).toBe(true)
+    expect(body.error).toContain("ODDS_API_KEY in the environment, which takes precedence")
+    // A key held by the server is never described, not even by how it ends.
+    expect(body.error).not.toContain("ending in")
+    expect(body.error).not.toContain("3210")
+    expect(body.error).not.toContain("characters")
+  })
+
+  it("says so when the environment holds something that is not the shape of a key", async () => {
+    vi.stubEnv("ODDS_API_KEY", "ODDS_API_KEY=oops-this-line-was-pasted-twice")
+    stubKnowing(CURRENT)
+    const body = (await (await today({ provider: "theoddsapi", apiKey: CURRENT, league: "nba" })).json()) as {
+      error: string
+    }
+    expect(body.error).toContain("not the shape of an Odds API key")
+    expect(body.error).not.toContain("oops")
+  })
+
+  it("says something else was saved when the key from Settings is not the shape of one", async () => {
+    vi.stubEnv("ODDS_API_KEY", "")
+    stubKnowing(CURRENT)
+    const body = (await (
+      await today({ provider: "theoddsapi", apiKey: `Key${CURRENT}`, league: "nba" })
+    ).json()) as { error: string }
+    expect(body.error).toContain('35 characters, ending in "cdef"')
+    expect(body.error).toContain("An Odds API key is 32 characters, each a digit or a letter from a to f")
+    expect(body.error).toContain("paste the key on its own")
+  })
+
+  for (const [name, call] of [
+    ["/api/today", today],
+    ["/api/odds", odds],
+  ] as const) {
+    it(`${name} sends the key alone when it was saved with the label printed above it`, async () => {
+      // What Chromium stores when the account page's "API Key" line and the
+      // key under it are pasted together. Sent as it stood, the feed refused
+      // it; the key inside it is the valid one.
+      vi.stubEnv("ODDS_API_KEY", "")
+      const sent = stubKnowing(CURRENT)
+      const res = await call({ provider: "theoddsapi", apiKey: `API Key ${CURRENT}`, league: "nba" })
+      expect(res.status).toBe(200)
+      expect(sent.length).toBeGreaterThan(0)
+      expect(sent.every((k) => k === CURRENT)).toBe(true)
+    })
+  }
+
+  it("does not send a used-up month to Settings, though it is the same status", async () => {
+    vi.stubEnv("ODDS_API_KEY", "")
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => json({ message: "Usage quota has been reached.", error_code: "OUT_OF_USAGE_CREDITS" }, 401)),
+    )
+    const res = await today({ provider: "theoddsapi", apiKey: CURRENT, league: "nba" })
+    const body = (await res.json()) as { error: string; needsKey?: boolean }
+    expect(res.status).toBe(502)
+    expect(body.needsKey).toBe(false)
+    expect(body.error).toBe("The Odds API quota is used up for this period. Usage quota has been reached.")
   })
 })
 

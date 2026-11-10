@@ -5,6 +5,15 @@
  * worth pricing, and whether a pull priced anything at all).
  */
 
+import {
+  FeedKeyError,
+  ODDS_API_KEY_SHAPE,
+  describeKey,
+  keySourceHint,
+  looksLikeOddsApiKey,
+  type ResolvedKey,
+} from "./api-key"
+
 /**
  * A count from a response header, or null when the header is absent or not a
  * number. Number(null) is 0, which read as "no requests left" whenever a
@@ -17,8 +26,68 @@ export function headerCount(headers: Headers, name: string): number | null {
   return Number.isFinite(n) ? n : null
 }
 
-/** A readable sentence from a failed Odds API response, naming an exhausted quota as such. */
-export async function oddsApiErrorText(res: Response): Promise<string> {
+/** The sentences that are there, joined. */
+function sentences(...parts: (string | null | undefined)[]): string {
+  return parts
+    .map((p) => (p ?? "").trim())
+    .filter(Boolean)
+    .join(" ")
+}
+
+/**
+ * The Odds API ends its bad-key sentence with where to sign up. Said to
+ * someone whose key the feed has just refused, that reads as "get another
+ * key", and a new key changes nothing while the old one is still what this app
+ * sends.
+ */
+function withoutSignupAdvice(detail: string): string {
+  return detail.replace(/\s*Get an API key at \S+\s*$/i, "").trim()
+}
+
+/**
+ * What to do about a key The Odds API refused, given the key that was sent.
+ *
+ * "The Odds API rejected the API key" is true and, on its own, no use to
+ * someone looking at an account page that says the key is active. Both can be
+ * right at once, because the key on the account page and the key this app sent
+ * are not necessarily the same key, and nothing on screen showed the second
+ * one: it sits in a masked field, or in a file on the server that outranks
+ * that field. A real install was told its key was not valid while the feed
+ * answered that same key correctly from anywhere else. So the refusal says
+ * which key went, where it lives and how to tell it from the right one.
+ *
+ * A key from Settings is described back to the browser that sent it. A key
+ * from the environment is named and never described: see describeKey.
+ */
+export function refusedOddsApiKeyAdvice(key: ResolvedKey | null): string {
+  if (!key) return ""
+  const shaped = looksLikeOddsApiKey(key.key)
+  if (key.source === "environment") {
+    return sentences(
+      keySourceHint(key),
+      shaped
+        ? null
+        : `What is there is not the shape of an Odds API key, which is ${ODDS_API_KEY_SHAPE}, so check it for anything besides the key.`,
+    )
+  }
+  return sentences(
+    `The key sent is the one saved in this browser under ${key.label}: ${describeKey(key.key)}.`,
+    shaped
+      ? // Either way the fix is the same paste, so it is said for both: a key
+        // that ends the same and is still refused differs somewhere else.
+        "Compare it with the key on your the-odds-api.com account. If that one ends differently, the saved key is out of date; either way, clear that field and paste the current key. Keys are kept per browser and per address the app is opened at, so a key changed on another device or at another address has not changed here."
+      : `An Odds API key is ${ODDS_API_KEY_SHAPE}, so something else was saved with it or in its place: clear that field and paste the key on its own.`,
+  )
+}
+
+/**
+ * What a failed Odds API response means, read once: the sentence to show and
+ * whether the key was what it refused.
+ */
+async function describeOddsApiFailure(
+  res: Response,
+  key: ResolvedKey | null,
+): Promise<{ message: string; keyRejected: boolean }> {
   const text = await res.text().catch(() => "")
   let detail = text.slice(0, 300)
   let code: string | null = null
@@ -29,10 +98,42 @@ export async function oddsApiErrorText(res: Response): Promise<string> {
   } catch {
     // Not JSON: the raw text is the best there is.
   }
-  if (code === "OUT_OF_USAGE_CREDITS") return `The Odds API quota is used up for this period. ${detail}`.trim()
-  if (res.status === 401) return `The Odds API rejected the API key. ${detail}`.trim()
-  if (res.status === 429) return `The Odds API is limiting requests. Wait a minute and try again. ${detail}`.trim()
-  return `The Odds API returned ${res.status}. ${detail}`.trim()
+  // Also a 401, and not about the key: a used-up month is fixed by waiting.
+  if (code === "OUT_OF_USAGE_CREDITS") {
+    return { message: sentences("The Odds API quota is used up for this period.", detail), keyRejected: false }
+  }
+  if (res.status === 401) {
+    return {
+      message: sentences(
+        "The Odds API rejected the API key.",
+        key ? withoutSignupAdvice(detail) : detail,
+        refusedOddsApiKeyAdvice(key),
+      ),
+      keyRejected: true,
+    }
+  }
+  if (res.status === 429) {
+    return {
+      message: sentences("The Odds API is limiting requests. Wait a minute and try again.", detail),
+      keyRejected: false,
+    }
+  }
+  return { message: sentences(`The Odds API returned ${res.status}.`, detail), keyRejected: false }
+}
+
+/**
+ * A readable sentence from a failed Odds API response, naming an exhausted
+ * quota as such and, given the key that was sent, saying where a refused one
+ * came from.
+ */
+export async function oddsApiErrorText(res: Response, key?: ResolvedKey | null): Promise<string> {
+  return (await describeOddsApiFailure(res, key ?? null)).message
+}
+
+/** The error to throw for a failed Odds API response, typed so a refused key is recognisable. */
+export async function oddsApiFailure(res: Response, key?: ResolvedKey | null): Promise<Error> {
+  const { message, keyRejected } = await describeOddsApiFailure(res, key ?? null)
+  return keyRejected ? new FeedKeyError(message) : new Error(message)
 }
 
 /**
@@ -46,12 +147,16 @@ export async function oddsApiErrorText(res: Response): Promise<string> {
  * Read per request rather than as an x-requests-used delta on purpose: the
  * quota counter is per key, so a second device on the same key mid-pull makes
  * the delta measure someone else's pull as well as this one.
+ *
+ * `key` is the key the URL carries and where it came from, so a refusal can
+ * say which key it was. It is never sent anywhere from here.
  */
 export async function fetchOddsApi<T>(
   url: string,
+  key?: ResolvedKey | null,
 ): Promise<{ data: T; remaining: number | null; used: number | null; last: number | null }> {
   const res = await fetch(url, { cache: "no-store" })
-  if (!res.ok) throw new Error(await oddsApiErrorText(res))
+  if (!res.ok) throw await oddsApiFailure(res, key)
   return {
     data: (await res.json()) as T,
     remaining: headerCount(res.headers, "x-requests-remaining"),

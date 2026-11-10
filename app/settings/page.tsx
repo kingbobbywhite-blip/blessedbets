@@ -15,6 +15,8 @@ import { DEVIG_METHODS, type DevigMethod } from "@/lib/quant/odds"
 import { payoutMultiple, payoutVerified, supportedPickCounts } from "@/lib/quant/payouts"
 import { exportState, importState } from "@/lib/store/local"
 import { useStore } from "@/lib/store/provider"
+import { useServerKeys } from "@/hooks/use-server-keys"
+import { savedKeyNote, type SavedKeyNote } from "@/lib/odds-feed/api-key"
 import { companionsOf, creditPlan, leagueFor, maxGamesFor, pullPlan, reseedGameCap } from "@/lib/leagues"
 import { marketsForCompetition, marketsForLeague } from "@/lib/odds-feed/theoddsapi"
 import { DEFAULT_SETTINGS, marketsFor, withMarketsFor, type OddsProvider } from "@/lib/store/schema"
@@ -24,6 +26,9 @@ const TAB = "px-1.5 text-xs sm:px-2 sm:text-sm"
 
 export default function SettingsPage() {
   const { state, setSettings, replaceAll, saveError, ready } = useStore()
+  // Which keys the server holds in its environment. One there is sent instead
+  // of the key typed here, and each key field says so.
+  const serverKeys = useServerKeys()
   const s = state.settings
   const dailyLeague = leagueFor(s.daily.league)
   // Width is free on a per-request feed, so what a press actually asks for
@@ -342,6 +347,12 @@ export default function SettingsPage() {
                 placeholder="prop-line.com key"
                 className="mt-1.5 font-mono text-xs"
               />
+              <SavedKey
+                note={savedKeyNote(s.oddsFeed.proplineKey, {
+                  envName: "PROPLINE_API_KEY",
+                  serverHasKey: !!serverKeys?.propline,
+                })}
+              />
               <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
                 Free at{" "}
                 <a href="https://prop-line.com" target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">
@@ -380,6 +391,13 @@ export default function SettingsPage() {
                 onChange={(e) => setSettings((p) => ({ ...p, oddsFeed: { ...p.oddsFeed, apiKey: e.target.value } }))}
                 placeholder="the-odds-api.com key"
                 className="mt-1.5 font-mono text-xs"
+              />
+              <SavedKey
+                note={savedKeyNote(s.oddsFeed.apiKey, {
+                  envName: "ODDS_API_KEY",
+                  serverHasKey: !!serverKeys?.oddsApi,
+                  oddsApi: true,
+                })}
               />
               <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
                 Stored in this browser and sent only to the odds feed, through this app's own server so it never appears
@@ -797,6 +815,24 @@ function SliderRow({
       <Slider className="mt-2.5" value={[value]} min={min} max={max} step={step} onValueChange={([v]) => onChange(v)} />
       <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">{hint}</p>
     </div>
+  )
+}
+
+/**
+ * What is saved in a key field, beneath it. The fields are masked, so this
+ * line is the only way to check one against the vendor's account page: a key
+ * that has since been replaced there, and a key saved with something else
+ * beside it, are the same row of dots.
+ */
+function SavedKey({ note }: { note: SavedKeyNote | null }) {
+  if (!note) return null
+  return note.warn ? (
+    <p className="mt-1.5 flex items-start gap-1.5 text-[11px] leading-relaxed text-accent">
+      <TriangleAlert className="mt-0.5 size-3 shrink-0" />
+      <span>{note.text}</span>
+    </p>
+  ) : (
+    <p className="mt-1.5 text-[11px] leading-relaxed text-foreground/80">{note.text}</p>
   )
 }
 

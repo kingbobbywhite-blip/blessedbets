@@ -206,8 +206,27 @@ from. Three things cause it:
 - The key was pasted with a newline or wrapping quotes. Those are stripped now, but the
   PowerShell 5 UTF-16 trap above still applies.
 
+**"The Odds API rejected the API key"** while your the-odds-api.com account shows the key as
+active means the key this app sent is not the key on that page. Both fields in Settings are
+masked, so the message says which key went: where it came from and, for one saved in
+Settings, how long it is and its last four characters. Beneath each key field, Settings shows
+the same for what is saved there. Compare that with the account page. Three things cause it:
+
+- The key saved in Settings is an old one. Replacing a key on the vendor's site changes
+  nothing here, and keys are kept per browser and per address the app is opened at, so a key
+  updated on another device, or under another address of the same deployment, has not changed
+  in this one. Clear the field and paste the current key.
+- `ODDS_API_KEY` in `.env.local`, or in the host's environment, holds something stale. It
+  takes precedence over Settings, so retyping the key in Settings changes nothing; Settings
+  says so beneath the field when the server holds one. Correct it there, or remove it.
+- Something was saved with the key or in its place. An account page prints `API Key` on the
+  line above the key, and selecting both pastes into the field as `API Key 0123…`: forty
+  masked characters where thirty-two were meant. A label copied with a key is ignored now,
+  and a saved value that is not the shape of an Odds API key (32 characters, each a digit or
+  a letter from a to f) is flagged beneath the field. A PropLine key is not an Odds API key.
+
 ```bash
-npm test         # 745 unit tests over the probability engine, the feeds and screenshot reading
+npm test         # 798 unit tests over the probability engine, the feeds and screenshot reading
 npm run lint
 npm run build
 ```

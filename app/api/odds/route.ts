@@ -8,7 +8,7 @@ import {
   normalizeMany,
 } from "@/lib/odds-feed/theoddsapi"
 import { FeedKeyError, normalizeProplineMany, pullPropline, resolveProplineKeySource } from "@/lib/odds-feed/propline"
-import { resolveKey as resolveApiKey } from "@/lib/odds-feed/api-key"
+import { resolveKey as resolveApiKey, type ResolvedKey } from "@/lib/odds-feed/api-key"
 import { feedErrorText, fetchOddsApi, noneCouldBePriced, notStarted } from "@/lib/odds-feed/http"
 import type { FeedEvent, FeedEventOdds } from "@/lib/odds-feed/types"
 import { DEFAULT_LEAGUE, LEAGUE_IDS, isLeagueId, leagueFor, maxGamesFor } from "@/lib/leagues"
@@ -52,11 +52,12 @@ interface RequestBody {
   maxGames?: number
 }
 
-function resolveKey(body: RequestBody): string | null {
+/** The Odds API key and where it came from, so a refusal can say which key it was. */
+function resolveKey(body: RequestBody): ResolvedKey | null {
   return resolveApiKey(process.env.ODDS_API_KEY, body.apiKey, {
     env: "ODDS_API_KEY",
-    settings: "Settings \u2192 Odds feed \u2192 API key",
-  })?.key ?? null
+    settings: "Settings \u2192 Odds feed \u2192 The Odds API key",
+  })
 }
 
 export async function POST(request: Request) {
@@ -81,7 +82,8 @@ export async function POST(request: Request) {
   const usePropline = body.provider === "propline"
   const proplineKeySource = usePropline ? resolveProplineKeySource(body.proplineKey) : null
   const proplineKey = proplineKeySource?.key ?? null
-  const apiKey = usePropline ? null : resolveKey(body)
+  const apiKeySource = usePropline ? null : resolveKey(body)
+  const apiKey = apiKeySource?.key ?? null
   if (usePropline && !proplineKey) {
     return NextResponse.json(
       { error: "No PropLine key. Add one in Settings, or set PROPLINE_API_KEY in the environment." },
@@ -173,7 +175,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const events = await fetchOddsApi<FeedEvent[]>(eventsUrl(apiKey!, leagueId))
+    const events = await fetchOddsApi<FeedEvent[]>(eventsUrl(apiKey!, leagueId), apiKeySource)
     if (!Array.isArray(events.data)) throw new SyntaxError("events listing is not a list")
     const listed = events.data
       .filter((e) => {
@@ -213,6 +215,7 @@ export async function POST(request: Request) {
       try {
         const r = await fetchOddsApi<FeedEventOdds>(
           eventOddsUrl(apiKey!, e.id, { markets, regions, bookmakers: body.bookmakers, league: leagueId }),
+          apiKeySource,
         )
         payloads.push(r.data)
         if (r.remaining != null) remaining = r.remaining
@@ -246,6 +249,10 @@ export async function POST(request: Request) {
       requestsUsed: used,
     })
   } catch (err) {
-    return NextResponse.json({ error: feedErrorText(err, "The Odds API") }, { status: 502 })
+    // As on the PropLine path above: a refused key sends the screen to Settings.
+    return NextResponse.json(
+      { error: feedErrorText(err, "The Odds API"), needsKey: err instanceof FeedKeyError },
+      { status: 502 },
+    )
   }
 }

@@ -8,7 +8,10 @@ import { attributedGames, teamNickname } from "./games"
 import type { PickType } from "@/lib/store/schema"
 import { feedKeyFor, feedMarketFor, normalizeEventOdds, sportOfFeedKey, type NormalizeResult } from "./theoddsapi"
 import { feedErrorText, notStarted } from "./http"
-import { keySourceHint, resolveKey, type ResolvedKey } from "./api-key"
+import { FeedKeyError, keySourceHint, resolveKey, type ResolvedKey } from "./api-key"
+// Re-exported: it was defined here until The Odds API's refusals needed it
+// too, and the routes (and tests) still reach for it from this module.
+export { FeedKeyError }
 import type { FeedBookmaker, FeedEvent, FeedEventOdds, FeedOutcome } from "./types"
 
 /**
@@ -442,18 +445,6 @@ export function parseProplineError(text: string): ProplineErrorBody {
     code: stringAt(info, "error") ?? stringAt(info, "error_code") ?? stringAt(top, "error_code"),
     message: (typeof detail === "string" ? detail.trim() : null) || stringAt(info, "message"),
     url: stringAt(info, "signup_url") ?? stringAt(info, "upgrade_url") ?? stringAt(info, "docs_url"),
-  }
-}
-
-/**
- * A feed failure the key is to blame for. Separate from any other error
- * because no retry fixes it and the screen should offer Settings rather than
- * invite a retry that fails the same way.
- */
-export class FeedKeyError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = "FeedKeyError"
   }
 }
 
