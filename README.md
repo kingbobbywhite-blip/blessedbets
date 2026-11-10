@@ -531,6 +531,47 @@ opened at all, the app falls back to the old blob and sheds from the *stored cop
 — older line history, then another league's slate, then the rest of the history, then the
 imported board — and slips are never shed: they are the only record of what the model predicted.
 
+## Two tabs open at once
+
+Open the app in two tabs, or in a tab and an installed window, and each holds its own copy of
+everything in memory. Each used to read storage once, on load, and from then on write the whole
+settings-and-slips record from its own copy. So the two never saw each other's changes, and the
+one that had been open longer undid the other's whenever it saved anything at all. An Odds API key
+pasted into Settings in one tab was gone, or was the previous key again, as soon as a Today screen
+left open in another tab switched league — and the next pull failed with "The Odds API rejected
+the API key" for a key that was right.
+
+Three things replace that, in order of how much each is relied on:
+
+- **A save carries only what that tab changed.** The record is read and written in one
+  transaction, and if another tab has stored it in the meantime, this tab's changes are added to
+  what is there instead of replacing it: settings field by field, logged entries one by one, the
+  line history pull by pull. A slate is one pull and goes in whole. This is what makes a stale tab
+  harmless, and it does not depend on anything arriving.
+- **A tab that saves a record says so, and the others read that record again**, so a change shows
+  on the other screen without a reload. Only the record's name passes between tabs. The content,
+  which includes the feed keys, is only ever read from the database.
+- **A tab looks at everything again when it comes back into view.** A tab the browser froze in
+  the background heard nothing while it was away.
+
+Where two tabs changed the same field, the one that saved later wins. A change arriving from
+another tab is laid under what is on this screen, not over it, so nothing typed is lost to one.
+"Nothing is ever taken off the screen to make a save fit" still holds: the only thing that leaves a
+screen is a slate another tab removed on purpose, by restoring a file that has none for that league.
+
+What it does not do:
+
+- **Reach another browser or device.** It is still one browser's storage. On an iPhone or iPad an
+  app added to the Home Screen has storage of its own, apart from Safari's, so a key saved in one
+  is not in the other; Export and Restore under Settings are the way across.
+- **Fix a window still running an older build.** One left open across an update writes the old way
+  until it is reloaded. What it stores is noticed and added to rather than lost, but it will go on
+  undoing other tabs' settings until then.
+- **Give the localStorage fallback transactions.** Where IndexedDB cannot be opened the same rules
+  apply to the one blob, read just before it is written, which narrows the gap to an instant
+  without closing it. A slate shed from the stored copy for want of room stays on the screen of the
+  tab that pulled it, at the cost that a slate really removed in another tab stays until a reload.
+
 ## Leagues
 
 | | NBA | NFL | CFB |
