@@ -15,6 +15,7 @@ import { DEVIG_METHODS, type DevigMethod } from "@/lib/quant/odds"
 import { payoutMultiple, payoutVerified, supportedPickCounts } from "@/lib/quant/payouts"
 import { exportState, importState } from "@/lib/store/local"
 import { useStore } from "@/lib/store/provider"
+import { useServerKeys } from "@/hooks/use-server-keys"
 import { companionsOf, creditPlan, leagueFor, maxGamesFor, pullPlan, reseedGameCap } from "@/lib/leagues"
 import { marketsForCompetition, marketsForLeague } from "@/lib/odds-feed/theoddsapi"
 import { DEFAULT_SETTINGS, marketsFor, withMarketsFor, type OddsProvider } from "@/lib/store/schema"
@@ -24,6 +25,9 @@ const TAB = "px-1.5 text-xs sm:px-2 sm:text-sm"
 
 export default function SettingsPage() {
   const { state, setSettings, replaceAll, saveError, ready } = useStore()
+  // Which keys the server holds itself. One of those is used instead of the
+  // key typed here, so the field below it says so.
+  const serverKeys = useServerKeys()
   const s = state.settings
   const dailyLeague = leagueFor(s.daily.league)
   // Width is free on a per-request feed, so what a press actually asks for
@@ -350,6 +354,7 @@ export default function SettingsPage() {
                 . Stored in this browser and sent only to PropLine, through this app&apos;s server. PROPLINE_API_KEY in the
                 environment takes precedence.
               </p>
+              {serverKeys?.propline ? <ServerKeyNotice name="PROPLINE_API_KEY" /> : null}
             </div>
 
             <div className="flex items-start justify-between gap-3 rounded-lg border border-border/50 p-3">
@@ -385,6 +390,7 @@ export default function SettingsPage() {
                 Stored in this browser and sent only to the odds feed, through this app's own server so it never appears
                 in page JavaScript. You can also set ODDS_API_KEY in the environment instead, which takes precedence.
               </p>
+              {serverKeys?.oddsApi ? <ServerKeyNotice name="ODDS_API_KEY" /> : null}
             </div>
 
             <div>
@@ -737,6 +743,28 @@ export default function SettingsPage() {
         </TabsContent>
       </Tabs>
     </div>
+  )
+}
+
+/**
+ * Says that the key in the field above is not the one being sent.
+ *
+ * A key in the server's environment outranks the one typed here, and nothing
+ * on this screen showed that it did: the field took a new key, kept it, and
+ * every pull went on sending the environment's. A feed that then rejects the
+ * key reads as "the key I just typed is wrong", which no amount of retyping
+ * or regenerating can fix.
+ */
+function ServerKeyNotice({ name }: { name: string }) {
+  return (
+    <p role="note" className="mt-1.5 flex items-start gap-1.5 text-[11px] leading-relaxed text-accent">
+      <TriangleAlert className="mt-0.5 size-3 shrink-0" />
+      <span>
+        This server has {name} set in its environment, and that is the key every pull sends. A key typed here is
+        kept but not used until {name} is removed there: on Vercel, under the project&apos;s Settings → Environment
+        Variables, followed by a redeploy; on your own machine, in .env.local, followed by a restart.
+      </span>
+    </p>
   )
 }
 

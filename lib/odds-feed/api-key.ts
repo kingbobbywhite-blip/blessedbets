@@ -92,10 +92,51 @@ export function resolveKey(
   return null
 }
 
-/** Where to go and fix the key that a feed just rejected. */
-export function keySourceHint(resolved: Pick<ResolvedKey, "source" | "label"> | null): string {
+/**
+ * A feed failure the key is to blame for. Separate from any other error
+ * because no retry fixes it and the screen should offer Settings rather than
+ * invite a retry that fails the same way.
+ */
+export class FeedKeyError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "FeedKeyError"
+  }
+}
+
+/**
+ * The last four characters of a key: enough to tell one key from another,
+ * which is how keys get talked about ("the one ending 4026"), and too little
+ * to be worth anything to anyone. Null for a key so short that four
+ * characters would be a real part of it.
+ */
+export function keyEnding(key: string): string | null {
+  return key.length >= 12 ? key.slice(-4) : null
+}
+
+/**
+ * Where to go and fix the key that a feed just rejected.
+ *
+ * A key from Settings is named by its ending as well. "Rejected the API key"
+ * was being answered by generating a new key, and then another, when the key
+ * that had actually been sent was a different one altogether: an older key
+ * still held by a tab that had been open a while, or by the other of Safari
+ * and the home-screen app. Which key it was is the one thing the server knows
+ * and the screen did not say.
+ *
+ * A key from the environment is never described at all. Not one character of
+ * it leaves the server (see ./keys), and where it came from is the whole
+ * answer anyway: retyping a key in Settings cannot change it.
+ */
+export function keySourceHint(
+  resolved: (Pick<ResolvedKey, "source" | "label"> & { key?: string }) | null,
+): string {
   if (!resolved) return ""
-  return resolved.source === "environment"
-    ? `The key came from ${resolved.label} in the environment, which takes precedence over the one in Settings: correct it there, or remove it to use the key from Settings.`
+  if (resolved.source === "environment") {
+    return `The key came from ${resolved.label} in the environment, which takes precedence over the one in Settings: correct it there, or remove it to use the key from Settings.`
+  }
+  const ending = resolved.key ? keyEnding(resolved.key) : null
+  return ending
+    ? `The key came from ${resolved.label} and ends in "${ending}".`
     : `The key came from ${resolved.label}.`
 }

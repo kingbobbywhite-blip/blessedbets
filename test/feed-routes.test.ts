@@ -839,6 +839,99 @@ describe("a PropLine key the feed rejects", () => {
   })
 })
 
+/**
+ * The report: "The Odds API rejected the API key. API key is not valid."
+ * for a key that had just been generated, and again for the one generated
+ * after it. The sentence does not say which key was sent, and the key just
+ * typed is the one everybody assumes. PropLine's rejection has named its key
+ * since the same thing happened there; this one never did.
+ */
+describe("an Odds API key the feed rejects", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+  })
+
+  /** The Odds API's own body on a key it does not know, link and all. */
+  const REJECTED = {
+    message: "API key is not valid. Get an API key at https://the-odds-api.com",
+    error_code: "INVALID_KEY",
+  }
+  /** Made up, the length of a real one. */
+  const TYPED = "0123456789abcdef0123456789ab4026"
+  const ON_THE_SERVER = "an-older-key-left-on-the-server-9999"
+
+  /** Every Odds API request answers 401 with `body`, and the keys it was sent are recorded. */
+  function stubRejecting(body: object = REJECTED) {
+    const sent: (string | null)[] = []
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        sent.push(new URL(url).searchParams.get("apiKey"))
+        return json(body, 401)
+      }),
+    )
+    return sent
+  }
+
+  for (const [name, call] of [
+    ["/api/today", today],
+    ["/api/odds", odds],
+  ] as const) {
+    it(`${name} says which key was refused: the one from Settings, by its ending`, async () => {
+      vi.stubEnv("ODDS_API_KEY", "")
+      const sent = stubRejecting()
+      const res = await call({ provider: "theoddsapi", apiKey: TYPED, league: "nba" })
+      const body = (await res.json()) as { error: string; needsKey?: boolean }
+      expect(res.status).toBe(502)
+      expect(sent[0]).toBe(TYPED)
+      expect(body.error).toBe(
+        'The Odds API rejected the API key. API key is not valid. Get an API key at https://the-odds-api.com. The key came from Settings → Odds feed → The Odds API key and ends in "4026".',
+      )
+      // Settings is where that key lives, so that is where the screen points.
+      expect(body.needsKey).toBe(true)
+      // The ending tells keys apart. The key itself is not sent back.
+      expect(body.error).not.toContain(TYPED)
+    })
+
+    it(`${name} names the environment when its key outranked the one typed in Settings`, async () => {
+      // The case no amount of retyping fixes: the key in Settings is new and
+      // right, and is not the key that was sent.
+      vi.stubEnv("ODDS_API_KEY", ON_THE_SERVER)
+      const sent = stubRejecting()
+      const res = await call({ provider: "theoddsapi", apiKey: TYPED, league: "nba" })
+      const body = (await res.json()) as { error: string; needsKey?: boolean }
+      expect(sent[0]).toBe(ON_THE_SERVER)
+      expect(body.error).toContain("The Odds API rejected the API key.")
+      expect(body.error).toContain("ODDS_API_KEY in the environment, which takes precedence over the one in Settings")
+      // Not one character of a key the server holds, nor of the one that was not sent.
+      expect(body.error).not.toContain("9999")
+      expect(body.error).not.toContain("4026")
+      // Nothing typed in Settings changes which key is sent, so it is the wrong door.
+      expect(body.needsKey).toBeUndefined()
+    })
+  }
+
+  it("does not blame the key for a used-up quota, which comes back with the same status", async () => {
+    vi.stubEnv("ODDS_API_KEY", "")
+    stubRejecting({ message: "Usage quota has been reached.", error_code: "OUT_OF_USAGE_CREDITS" })
+    const res = await today({ provider: "theoddsapi", apiKey: TYPED, league: "nba" })
+    const body = (await res.json()) as { error: string; needsKey?: boolean }
+    expect(body.error).toBe("The Odds API quota is used up for this period. Usage quota has been reached.")
+    expect(body.needsKey).toBeUndefined()
+  })
+
+  it("leaves any other failure exactly as it read before", async () => {
+    vi.stubEnv("ODDS_API_KEY", "")
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("Bad gateway", { status: 503 })))
+    const body = (await (await today({ provider: "theoddsapi", apiKey: TYPED, league: "nba" })).json()) as {
+      error: string
+      needsKey?: boolean
+    }
+    expect(body).toEqual({ error: "The Odds API returned 503. Bad gateway" })
+  })
+})
+
 
 // ---------------------------------------------------------------------------
 // What a pull actually cost

@@ -206,8 +206,30 @@ from. Three things cause it:
 - The key was pasted with a newline or wrapping quotes. Those are stripped now, but the
   PowerShell 5 UTF-16 trap above still applies.
 
+**"The Odds API rejected the API key"** means The Odds API was sent a key it does not
+recognise. The message says which key that was — where it came from and, for a key from
+Settings, its last four characters — and that is the part to read first, because the key that
+was sent is not always the key just typed. Generating a new one does not help until it is:
+
+- **It names `ODDS_API_KEY` in the environment.** The server holds a key of its own and sends
+  that instead of the one in Settings, so nothing typed in Settings changes the outcome. Correct
+  or remove it where it is set: `.env.local` on your own machine, then restart; on Vercel, the
+  project's Settings → Environment Variables, then redeploy. Settings shows a notice under the
+  key field for as long as this is the case.
+- **It names Settings, and an ending that is not the key you just saved.** The pull was sent
+  from somewhere still holding an older key. Two tabs of one browser are kept in step (see
+  [Two tabs open at once](#two-tabs-open-at-once)), but Safari and the home-screen app on an
+  iPhone each have storage of their own: save the key in the one you pull from.
+- **It names Settings, and the ending is the right one.** Then the key that was typed is the key
+  that was sent, and The Odds API does not know it. Check it against the one in your
+  the-odds-api.com account, and that it is not the PropLine key: the two fields in Settings are
+  not interchangeable.
+
+A used-up quota comes back from The Odds API with the same status as a bad key. It is reported
+as a quota, and is not a reason to replace the key.
+
 ```bash
-npm test         # 745 unit tests over the probability engine, the feeds and screenshot reading
+npm test         # 831 unit tests over the probability engine, the feeds and screenshot reading
 npm run lint
 npm run build
 ```
