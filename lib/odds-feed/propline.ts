@@ -8,7 +8,7 @@ import { attributedGames, teamNickname } from "./games"
 import type { PickType } from "@/lib/store/schema"
 import { feedKeyFor, feedMarketFor, normalizeEventOdds, sportOfFeedKey, type NormalizeResult } from "./theoddsapi"
 import { feedErrorText, notStarted } from "./http"
-import { keySourceHint, resolveKey, type ResolvedKey } from "./api-key"
+import { FeedKeyError, keySourceHint, resolveKey, type ResolvedKey } from "./api-key"
 import type { FeedBookmaker, FeedEvent, FeedEventOdds, FeedOutcome } from "./types"
 
 /**
@@ -445,17 +445,9 @@ export function parseProplineError(text: string): ProplineErrorBody {
   }
 }
 
-/**
- * A feed failure the key is to blame for. Separate from any other error
- * because no retry fixes it and the screen should offer Settings rather than
- * invite a retry that fails the same way.
- */
-export class FeedKeyError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = "FeedKeyError"
-  }
-}
+// Defined beside the keys themselves, since both feeds raise it; exported
+// from here as well because this is where it has always been imported from.
+export { FeedKeyError }
 
 /**
  * What a failed PropLine response means, read once: the sentence to show and

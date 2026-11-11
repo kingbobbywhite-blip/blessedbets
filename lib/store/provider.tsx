@@ -1,9 +1,9 @@
 "use client"
 
 import * as React from "react"
-import type { LeagueId } from "@/lib/leagues"
-import { clearLegacyState, isQuotaError, loadState, saveReduced } from "./local"
-import { joinParts, openPartStore, partLabel, partsOf, partsToWrite, type PartStore } from "./idb"
+import { clearLegacyState, loadState, onStored } from "./local"
+import { joinParts, openPartStore, parseRecords, partsOf, type PartStore } from "./idb"
+import { openTabs, syncBlob, syncParts, type SaveFailure, type TabHost, type TabSync } from "./sync"
 import {
   EMPTY_STATE,
   MAX_LINE_SNAPSHOTS,
@@ -40,33 +40,22 @@ interface StoreValue {
   replaceAll: (next: AppState) => void
 }
 
-/** A save that did not happen, by the record (or, without IndexedDB, the piece) it was for. */
-interface SaveFailure {
-  label: string
-  quota: boolean
-  message: string
-}
-
 const Ctx = React.createContext<StoreValue | null>(null)
 
 /**
- * The most recently fetched slate, which a full localStorage keeps longest.
- * Not whichever tab is selected: switching tabs while a pull is in flight
- * would otherwise shed the slate the credits were just spent on.
+ * How long another tab has to stop storing the blob before this one reads it.
+ * Without IndexedDB every keystroke in a form stores the whole state again,
+ * megabytes of it, and reading each of those in full would keep this tab busy
+ * for as long as someone typed in the other.
  */
-function newestLeague(state: AppState): LeagueId {
-  const newest = (Object.keys(state.daily) as LeagueId[]).sort((a, b) =>
-    (state.daily[b]?.fetchedAt ?? "").localeCompare(state.daily[a]?.fetchedAt ?? ""),
-  )[0]
-  return newest ?? state.settings.daily.league
-}
+const STORED_PAUSE_MS = 200
 
 /**
  * Opens IndexedDB and reads the state out of it, moving an install still on
  * the old localStorage blob across first. Rejects where IndexedDB cannot be
  * used, and the caller falls back to that blob.
  */
-async function loadFromIndexedDb(): Promise<{ db: PartStore; state: AppState; records: string[] }> {
+async function loadFromIndexedDb(): Promise<{ db: PartStore; state: AppState; stored: Record<string, string> }> {
   const db = await openPartStore()
   // The old blob, or the empty state on a fresh install, written only if the
   // database holds nothing yet. The blob is cleared once it is in, giving its
@@ -74,103 +63,113 @@ async function loadFromIndexedDb(): Promise<{ db: PartStore; state: AppState; re
   if (await db.seed(partsOf(loadState()))) clearLegacyState()
   // Read back rather than trusted: if another tab seeded first, its state is
   // the one stored, and this tab has to show the same.
-  const records = await db.readAll()
+  const texts = await db.readAll()
+  const records = parseRecords(texts)
   const raw = joinParts(records)
-  return { db, state: raw ? migrate(raw) : EMPTY_STATE, records: Object.keys(records) }
+  // Only what could be read counts as stored. A record that would not parse
+  // is one to write over, not one to add this tab's changes to.
+  const stored = Object.fromEntries(Object.keys(records).map((key) => [key, texts[key]]))
+  return { db, state: raw ? migrate(raw) : EMPTY_STATE, stored }
 }
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = React.useState<AppState>(EMPTY_STATE)
   const [ready, setReady] = React.useState(false)
   const [failures, setFailures] = React.useState<Record<string, SaveFailure>>({})
-  // Where the state is written: IndexedDB, or null for the localStorage blob.
-  const db = React.useRef<PartStore | null>(null)
-  // Each IndexedDB record, by the references it was last written from.
-  const sent = React.useRef(new Map<string, unknown[]>())
+  // The state itself. `state` above is React's copy of it and can be a render
+  // behind: a change another tab made is laid under whatever was typed here
+  // an instant ago, and that needs the state as it is now, not as it was last
+  // drawn. Every change goes through `show`, which moves both.
+  const latest = React.useRef<AppState>(EMPTY_STATE)
+  // What keeps this tab in step with storage and with the other tabs: on
+  // IndexedDB, or on the localStorage blob. Null until storage has been read.
+  const sync = React.useRef<TabSync | null>(null)
+
+  const show = React.useCallback((next: AppState) => {
+    if (next === latest.current) return
+    latest.current = next
+    setState(next)
+  }, [])
+  const change = React.useCallback((update: (s: AppState) => AppState) => show(update(latest.current)), [show])
 
   React.useEffect(() => {
     let live = true
+    let unwatch = () => {}
+    // Listening before the first read, not after it: a record another tab
+    // writes while this one is still loading is announced once, and a tab
+    // that was not yet listening would show the older one until it next came
+    // into view. What is heard early is looked at as soon as there is a state
+    // to compare it with.
+    const early: string[] = []
+    const tabs = openTabs((key) => {
+      if (sync.current) sync.current.refresh([key])
+      else early.push(key)
+    })
+    const host: TabHost = { get: () => latest.current, set: show, failures: setFailures, tell: tabs.tell }
+
+    // A tab the browser froze in the background, or put aside whole and then
+    // restored, heard nothing while it was away. Coming back into view is
+    // when that matters, so that is when it looks at everything again.
+    const look = () => sync.current?.refresh()
+    const onVisible = () => {
+      if (document.visibilityState === "visible") look()
+    }
+    const onRestored = (e: PageTransitionEvent) => {
+      if (e.persisted) look()
+    }
+    document.addEventListener("visibilitychange", onVisible)
+    window.addEventListener("pageshow", onRestored)
+    window.addEventListener("focus", look)
+
     loadFromIndexedDb().then(
       (loaded) => {
         if (!live) return
-        db.current = loaded.db
-        // What is stored is what was just read, so nothing is rewritten on
-        // the first save. A stored record the state has no part for (a
-        // league since retired) is given empty references, so the first save
-        // removes it rather than leaving it to take up room forever.
-        const current = new Map(partsOf(loaded.state).map((p) => [p.key, p.refs]))
-        sent.current = new Map(loaded.records.map((k) => [k, current.get(k) ?? []]))
-        setState(loaded.state)
+        show(loaded.state)
+        sync.current = syncParts(loaded.db, host, loaded)
+        sync.current.refresh(early)
         setReady(true)
       },
       () => {
         if (!live) return
-        db.current = null
-        setState(loadState())
+        // No IndexedDB: the one localStorage blob. The browser itself says
+        // when another tab stores it.
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const stop = onStored(() => {
+          clearTimeout(timer)
+          timer = setTimeout(look, STORED_PAUSE_MS)
+        })
+        unwatch = () => {
+          clearTimeout(timer)
+          stop()
+        }
+        show(loadState())
+        sync.current = syncBlob(host)
         setReady(true)
       },
     )
     return () => {
       live = false
+      sync.current?.stop()
+      sync.current = null
+      tabs.close()
+      unwatch()
+      document.removeEventListener("visibilitychange", onVisible)
+      window.removeEventListener("pageshow", onRestored)
+      window.removeEventListener("focus", look)
     }
-  }, [])
+  }, [show])
 
   // Persist on every change, but not before the initial read has happened, or
   // we would overwrite stored data with the empty default on first paint.
   //
-  // Nothing here ever changes the state. A save that does not fit is reported
-  // and left at that: what is on screen stays on screen until a reload. The
-  // old rule — shed from the state until the save fits — ended, on a slate too
-  // big to store, by shedding the pull that had just come in, so a pull that
-  // succeeded read as "Nothing pulled yet".
+  // A save never changes the state to make itself fit. One that does not fit
+  // is reported and left at that: what is on screen stays on screen until a
+  // reload. The old rule — shed from the state until the save fits — ended, on
+  // a slate too big to store, by shedding the pull that had just come in, so a
+  // pull that succeeded read as "Nothing pulled yet". What a save can do is
+  // bring in what another tab stored in the meantime: see ./sync.
   React.useEffect(() => {
-    if (!ready) return
-    const store = db.current
-
-    if (!store) {
-      // No IndexedDB: the one localStorage blob, shed from the stored copy
-      // until it fits.
-      const r = saveReduced(state, newestLeague(state))
-      const next: Record<string, SaveFailure> = {}
-      for (const d of r.dropped) next[d] = { label: d, quota: true, message: "" }
-      if (!r.ok) next["*"] = { label: "everything", quota: false, message: r.error ?? "Could not save." }
-      setFailures((prev) => (sameFailures(prev, next) ? prev : next))
-      return
-    }
-
-    for (const part of partsToWrite(sent.current, state)) {
-      const { key, refs } = part
-      if (part.value == null) sent.current.delete(key)
-      else sent.current.set(key, refs)
-      store.write(key, part.value).then(
-        () => settle(key, refs, null),
-        (err: unknown) => settle(key, refs, err),
-      )
-    }
-
-    function settle(key: string, refs: unknown[], err: unknown) {
-      // Only the newest write of a record says whether it is stored: an
-      // answer to an older one is out of date.
-      const latest = sent.current.get(key)
-      if (latest !== undefined && latest !== refs) return
-      if (err == null) {
-        setFailures((prev) => {
-          if (!(key in prev)) return prev
-          const next = { ...prev }
-          delete next[key]
-          return next
-        })
-        return
-      }
-      const quota = isQuotaError(err)
-      // A write that failed for want of room is not retried until the part
-      // changes: the same megabytes would fail the same way on every
-      // keystroke. Any other failure may be passing, so the next save tries
-      // it again.
-      if (!quota && latest === refs) sent.current.delete(key)
-      const message = `Could not save ${partLabel(key)}: ${err instanceof Error ? err.message : String(err)}`
-      setFailures((prev) => ({ ...prev, [key]: { label: partLabel(key), quota, message } }))
-    }
+    if (ready) sync.current?.save()
   }, [state, ready])
 
   const unsaved = React.useMemo(
@@ -188,29 +187,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       ready,
       saveError,
       unsaved,
-      setSettings: (updater) => setState((s) => ({ ...s, settings: updater(s.settings) })),
-      setSlate: (slate) => setState((s) => ({ ...s, slate })),
-      setDaily: (daily) => setState((s) => ({ ...s, daily: { ...s.daily, [daily.league]: daily } })),
+      setSettings: (updater) => change((s) => ({ ...s, settings: updater(s.settings) })),
+      setSlate: (slate) => change((s) => ({ ...s, slate })),
+      setDaily: (daily) => change((s) => ({ ...s, daily: { ...s.daily, [daily.league]: daily } })),
       addLineSnapshot: (snapshot) =>
-        setState((s) => ({ ...s, lines: [snapshot, ...s.lines].slice(0, MAX_LINE_SNAPSHOTS) })),
-      addSlip: (slip) => setState((s) => ({ ...s, slips: [slip, ...s.slips] })),
+        change((s) => ({ ...s, lines: [snapshot, ...s.lines].slice(0, MAX_LINE_SNAPSHOTS) })),
+      addSlip: (slip) => change((s) => ({ ...s, slips: [slip, ...s.slips] })),
       updateSlip: (id, updater) =>
-        setState((s) => ({ ...s, slips: s.slips.map((x) => (x.id === id ? updater(x) : x)) })),
-      removeSlip: (id) => setState((s) => ({ ...s, slips: s.slips.filter((x) => x.id !== id) })),
-      replaceAll: (next) => setState(next),
+        change((s) => ({ ...s, slips: s.slips.map((x) => (x.id === id ? updater(x) : x)) })),
+      removeSlip: (id) => change((s) => ({ ...s, slips: s.slips.filter((x) => x.id !== id) })),
+      replaceAll: (next) => show(next),
     }),
-    [state, ready, saveError, unsaved],
+    [state, ready, saveError, unsaved, change, show],
   )
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
-}
-
-function sameFailures(a: Record<string, SaveFailure>, b: Record<string, SaveFailure>): boolean {
-  const ka = Object.keys(a)
-  return (
-    ka.length === Object.keys(b).length &&
-    ka.every((k) => b[k] && b[k].message === a[k].message && b[k].quota === a[k].quota)
-  )
 }
 
 export function useStore(): StoreValue {

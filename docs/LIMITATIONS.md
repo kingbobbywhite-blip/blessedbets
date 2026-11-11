@@ -157,6 +157,14 @@ headline calibration figure stays neutral until roughly a hundred legs have sett
 No server, no account. Clearing site data deletes your history. Export from settings
 regularly.
 
+One browser means one browser's storage. Two tabs of it share that storage and are kept in
+step: a save adds what its tab changed to what is stored rather than replacing it, and the
+other tab picks the change up. Nothing is shared between browsers or devices, and on an
+iPhone or iPad an app added to the Home Screen counts as a browser of its own, with storage
+apart from Safari's. A key pasted into one is not in the other, which reads on screen as the
+feed rejecting a key that is correct. Export in one and Restore in the other carries it
+across.
+
 ## 12. Exchange and prediction-market support is partial
 
 ProphetX and Polymarket are modelled in the payout registry, and their prices can be imported

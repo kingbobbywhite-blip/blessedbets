@@ -612,7 +612,7 @@ describe("a sport PropLine does not recognise", () => {
     expect(text).not.toContain("returned 404")
   })
 })
-import { cleanApiKey, isPlaceholderKey, keySourceHint, resolveKey, usableKey } from "@/lib/odds-feed/api-key"
+import { cleanApiKey, isPlaceholderKey, keyEnding, keySourceHint, resolveKey, usableKey } from "@/lib/odds-feed/api-key"
 
 /** The body PropLine actually sends on a bad key: `detail` is an object, not a sentence. */
 const INVALID_KEY = JSON.stringify({
@@ -748,6 +748,23 @@ describe("key hygiene", () => {
 
   it("says nothing when there is no key to name", () => {
     expect(keySourceHint(null)).toBe("")
+  })
+
+  it("names a key from Settings by its ending, and a key from the environment not at all", () => {
+    // "Rejected the API key" was being answered by generating a new key, when
+    // the key that had been sent was a different one. The ending says which.
+    const typed = { key: "0123456789abcdef0123456789ab4026", source: "settings" as const, label: "Settings → Odds feed" }
+    expect(keySourceHint(typed)).toBe('The key came from Settings → Odds feed and ends in "4026".')
+    // A key the server holds never leaves it, not even four characters of it.
+    const held = keySourceHint({ ...typed, source: "environment", label: "ODDS_API_KEY" })
+    expect(held).toContain("ODDS_API_KEY in the environment")
+    expect(held).not.toContain("4026")
+    // Four characters of a short key would be a real part of it.
+    expect(keySourceHint({ ...typed, key: "short-4026" })).toBe("The key came from Settings → Odds feed.")
+    expect(keyEnding("0123456789ab")).toBe("89ab")
+    expect(keyEnding("0123456789a")).toBeNull()
+    // With no key to describe, the place is still named.
+    expect(keySourceHint({ source: "settings", label: "Settings → Odds feed" })).toBe("The key came from Settings → Odds feed.")
   })
 })
 

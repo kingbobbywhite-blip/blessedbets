@@ -42,11 +42,12 @@ import {
 import type { FeedQuote } from "@/lib/quant/valuebets"
 import { buildPickemEntry, hasAppLines, pickemPlays, sideBars, upcomingQuotes } from "@/lib/today/build"
 import { useDailyPicks, type PickInputs } from "@/hooks/use-daily-picks"
+import { useServerKeys } from "@/hooks/use-server-keys"
 import { lineChanges, snapshotFor } from "@/lib/quant/lines"
 import { entryExpectation } from "@/lib/tracker/entries"
 import { marketsForCompetition } from "@/lib/odds-feed/theoddsapi"
 import { PROPLINE_FREE_DAILY } from "@/lib/odds-feed/propline"
-import { NO_SERVER_KEYS, hasFeedKey, parseServerKeys, type ServerKeys } from "@/lib/odds-feed/keys"
+import { NO_SERVER_KEYS, hasFeedKey } from "@/lib/odds-feed/keys"
 import { usableKey } from "@/lib/odds-feed/api-key"
 import { notStarted } from "@/lib/odds-feed/http"
 import { useStore } from "@/lib/store/provider"
@@ -90,7 +91,7 @@ export default function TodayPage() {
   const [confirmSpend, setConfirmSpend] = React.useState<string | null>(null)
   // Which keys the server holds in its environment, which the routes use
   // before any key from Settings. Null until the server has answered.
-  const [serverKeys, setServerKeys] = React.useState<ServerKeys | null>(null)
+  const serverKeys = useServerKeys()
   // The clock that retires games from a cached pull as they start. A minute is
   // fine-grained enough for tip-off and cheap enough to rebuild the picks on.
   const [now, setNow] = React.useState(() => Date.now())
@@ -98,21 +99,6 @@ export default function TodayPage() {
   React.useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 60_000)
     return () => window.clearInterval(id)
-  }, [])
-
-  React.useEffect(() => {
-    let live = true
-    fetch("/api/keys", { cache: "no-store" })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((json) => {
-        if (live) setServerKeys(parseServerKeys(json))
-      })
-      .catch(() => {
-        if (live) setServerKeys(NO_SERVER_KEYS)
-      })
-    return () => {
-      live = false
-    }
   }, [])
 
   const s = state.settings

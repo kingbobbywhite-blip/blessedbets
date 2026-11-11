@@ -11,7 +11,9 @@ import { EMPTY_STATE, migrate, type AppState } from "./schema"
  *
  * IndexedDB is where it lives now (see idb.ts). What is here is the old home:
  * one localStorage blob, read once to move an existing install across, and
- * written to only where IndexedDB cannot be opened at all.
+ * written to only where IndexedDB cannot be opened at all. Two tabs open on
+ * it are kept in step the same way as on IndexedDB, as far as one blob with
+ * no transactions allows: see syncBlob in ./sync.
  */
 
 /**
@@ -22,15 +24,43 @@ import { EMPTY_STATE, migrate, type AppState } from "./schema"
 const KEY = "wagerwise.state.v1"
 
 export function loadState(): AppState {
-  if (typeof window === "undefined") return EMPTY_STATE
   try {
-    const raw = window.localStorage.getItem(KEY)
+    const raw = readStored()
     if (!raw) return EMPTY_STATE
     return migrate(JSON.parse(raw))
   } catch {
     // Corrupt or unreadable storage must not take the whole app down.
     return EMPTY_STATE
   }
+}
+
+/**
+ * The blob exactly as it is stored, or null where there is none or storage
+ * cannot be read. Compared as text to tell whether another tab has stored it
+ * since this one last looked.
+ */
+export function readStored(): string | null {
+  if (typeof window === "undefined") return null
+  try {
+    return window.localStorage.getItem(KEY)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Calls `listener` when another tab stores the blob or clears storage, and
+ * returns the way to stop. The browser raises this in every tab but the one
+ * that did the storing, which is exactly who needs to hear it.
+ */
+export function onStored(listener: () => void): () => void {
+  if (typeof window === "undefined") return () => {}
+  const heard = (e: StorageEvent) => {
+    // A null key is the whole of storage being cleared.
+    if (e.key === KEY || e.key === null) listener()
+  }
+  window.addEventListener("storage", heard)
+  return () => window.removeEventListener("storage", heard)
 }
 
 /**

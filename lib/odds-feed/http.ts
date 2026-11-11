@@ -1,3 +1,5 @@
+import { FeedKeyError, keySourceHint, type ResolvedKey } from "./api-key"
+
 /**
  * Request plumbing shared by the routes that call the odds feeds: reading The
  * Odds API's quota headers and errors, turning a thrown fetch into a sentence,
@@ -17,8 +19,15 @@ export function headerCount(headers: Headers, name: string): number | null {
   return Number.isFinite(n) ? n : null
 }
 
-/** A readable sentence from a failed Odds API response, naming an exhausted quota as such. */
-export async function oddsApiErrorText(res: Response): Promise<string> {
+/**
+ * What a failed Odds API response means, read once: the sentence to show, and
+ * whether the key was what it refused.
+ *
+ * An exhausted quota comes back with the same 401 as a bad key and is not a
+ * key problem: the key is fine and no other key from the same account would
+ * do better, so it must not send anyone to Settings to replace it.
+ */
+async function describeOddsApiFailure(res: Response): Promise<{ message: string; keyRejected: boolean }> {
   const text = await res.text().catch(() => "")
   let detail = text.slice(0, 300)
   let code: string | null = null
@@ -29,10 +38,48 @@ export async function oddsApiErrorText(res: Response): Promise<string> {
   } catch {
     // Not JSON: the raw text is the best there is.
   }
-  if (code === "OUT_OF_USAGE_CREDITS") return `The Odds API quota is used up for this period. ${detail}`.trim()
-  if (res.status === 401) return `The Odds API rejected the API key. ${detail}`.trim()
-  if (res.status === 429) return `The Odds API is limiting requests. Wait a minute and try again. ${detail}`.trim()
-  return `The Odds API returned ${res.status}. ${detail}`.trim()
+  const say = (lead: string, keyRejected = false) => ({ message: `${lead} ${detail}`.trim(), keyRejected })
+  if (code === "OUT_OF_USAGE_CREDITS") return say("The Odds API quota is used up for this period.")
+  if (res.status === 401) return say("The Odds API rejected the API key.", true)
+  if (res.status === 429) return say("The Odds API is limiting requests. Wait a minute and try again.")
+  return say(`The Odds API returned ${res.status}.`)
+}
+
+/** A readable sentence from a failed Odds API response, naming an exhausted quota as such. */
+export async function oddsApiErrorText(res: Response): Promise<string> {
+  return (await describeOddsApiFailure(res)).message
+}
+
+/** The error for a failed Odds API response: a FeedKeyError when the key is what it refused. */
+export async function oddsApiFailure(res: Response): Promise<Error> {
+  const { message, keyRejected } = await describeOddsApiFailure(res)
+  return keyRejected ? new FeedKeyError(message) : new Error(message)
+}
+
+/**
+ * What a route answers with when a call to The Odds API threw.
+ *
+ * A refused key says which key it was. The feed's own sentence -- "API key is
+ * not valid" -- reads as "the key you just typed is wrong", and was answered
+ * by generating a new key and then another, none of which could help when the
+ * key that had been sent was not the one just typed: ODDS_API_KEY in the
+ * environment outranks Settings, and a tab that had been open a while could
+ * still be holding an older key. PropLine's rejection has named its key since
+ * the same thing happened there; this one never did.
+ *
+ * `needsKey` sends the screen to Settings, so it is only set when Settings is
+ * where the refused key came from. For a key from the environment that would
+ * be the wrong door: nothing typed there changes which key is sent.
+ */
+export function oddsApiFailureBody(err: unknown, key: ResolvedKey | null): { error: string; needsKey?: true } {
+  const error = feedErrorText(err, "The Odds API")
+  if (!(err instanceof FeedKeyError)) return { error }
+  // The feed ends its sentence on a link, with no full stop to follow it.
+  const said = /[.!?]$/.test(error) ? error : `${error}.`
+  return {
+    error: [said, keySourceHint(key)].filter(Boolean).join(" "),
+    ...(key?.source === "settings" ? { needsKey: true as const } : {}),
+  }
 }
 
 /**
@@ -51,7 +98,7 @@ export async function fetchOddsApi<T>(
   url: string,
 ): Promise<{ data: T; remaining: number | null; used: number | null; last: number | null }> {
   const res = await fetch(url, { cache: "no-store" })
-  if (!res.ok) throw new Error(await oddsApiErrorText(res))
+  if (!res.ok) throw await oddsApiFailure(res)
   return {
     data: (await res.json()) as T,
     remaining: headerCount(res.headers, "x-requests-remaining"),

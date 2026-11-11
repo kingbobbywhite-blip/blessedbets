@@ -206,8 +206,30 @@ from. Three things cause it:
 - The key was pasted with a newline or wrapping quotes. Those are stripped now, but the
   PowerShell 5 UTF-16 trap above still applies.
 
+**"The Odds API rejected the API key"** means The Odds API was sent a key it does not
+recognise. The message says which key that was — where it came from and, for a key from
+Settings, its last four characters — and that is the part to read first, because the key that
+was sent is not always the key just typed. Generating a new one does not help until it is:
+
+- **It names `ODDS_API_KEY` in the environment.** The server holds a key of its own and sends
+  that instead of the one in Settings, so nothing typed in Settings changes the outcome. Correct
+  or remove it where it is set: `.env.local` on your own machine, then restart; on Vercel, the
+  project's Settings → Environment Variables, then redeploy. Settings shows a notice under the
+  key field for as long as this is the case.
+- **It names Settings, and an ending that is not the key you just saved.** The pull was sent
+  from somewhere still holding an older key. Two tabs of one browser are kept in step (see
+  [Two tabs open at once](#two-tabs-open-at-once)), but Safari and the home-screen app on an
+  iPhone each have storage of their own: save the key in the one you pull from.
+- **It names Settings, and the ending is the right one.** Then the key that was typed is the key
+  that was sent, and The Odds API does not know it. Check it against the one in your
+  the-odds-api.com account, and that it is not the PropLine key: the two fields in Settings are
+  not interchangeable.
+
+A used-up quota comes back from The Odds API with the same status as a bad key. It is reported
+as a quota, and is not a reason to replace the key.
+
 ```bash
-npm test         # 745 unit tests over the probability engine, the feeds and screenshot reading
+npm test         # 831 unit tests over the probability engine, the feeds and screenshot reading
 npm run lint
 npm run build
 ```
@@ -530,6 +552,47 @@ banner in the header names it and says it will be gone after a reload. Where Ind
 opened at all, the app falls back to the old blob and sheds from the *stored copy*, cheapest first
 — older line history, then another league's slate, then the rest of the history, then the
 imported board — and slips are never shed: they are the only record of what the model predicted.
+
+## Two tabs open at once
+
+Open the app in two tabs, or in a tab and an installed window, and each holds its own copy of
+everything in memory. Each used to read storage once, on load, and from then on write the whole
+settings-and-slips record from its own copy. So the two never saw each other's changes, and the
+one that had been open longer undid the other's whenever it saved anything at all. An Odds API key
+pasted into Settings in one tab was gone, or was the previous key again, as soon as a Today screen
+left open in another tab switched league — and the next pull failed with "The Odds API rejected
+the API key" for a key that was right.
+
+Three things replace that, in order of how much each is relied on:
+
+- **A save carries only what that tab changed.** The record is read and written in one
+  transaction, and if another tab has stored it in the meantime, this tab's changes are added to
+  what is there instead of replacing it: settings field by field, logged entries one by one, the
+  line history pull by pull. A slate is one pull and goes in whole. This is what makes a stale tab
+  harmless, and it does not depend on anything arriving.
+- **A tab that saves a record says so, and the others read that record again**, so a change shows
+  on the other screen without a reload. Only the record's name passes between tabs. The content,
+  which includes the feed keys, is only ever read from the database.
+- **A tab looks at everything again when it comes back into view.** A tab the browser froze in
+  the background heard nothing while it was away.
+
+Where two tabs changed the same field, the one that saved later wins. A change arriving from
+another tab is laid under what is on this screen, not over it, so nothing typed is lost to one.
+"Nothing is ever taken off the screen to make a save fit" still holds: the only thing that leaves a
+screen is a slate another tab removed on purpose, by restoring a file that has none for that league.
+
+What it does not do:
+
+- **Reach another browser or device.** It is still one browser's storage. On an iPhone or iPad an
+  app added to the Home Screen has storage of its own, apart from Safari's, so a key saved in one
+  is not in the other; Export and Restore under Settings are the way across.
+- **Fix a window still running an older build.** One left open across an update writes the old way
+  until it is reloaded. What it stores is noticed and added to rather than lost, but it will go on
+  undoing other tabs' settings until then.
+- **Give the localStorage fallback transactions.** Where IndexedDB cannot be opened the same rules
+  apply to the one blob, read just before it is written, which narrows the gap to an instant
+  without closing it. A slate shed from the stored copy for want of room stays on the screen of the
+  tab that pulled it, at the cost that a slate really removed in another tab stays until a reload.
 
 ## Leagues
 

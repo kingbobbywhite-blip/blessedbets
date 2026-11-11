@@ -35,6 +35,7 @@ import {
   fetchOddsApi,
   noneCouldBePriced,
   notStarted,
+  oddsApiFailureBody,
   sumCosts,
   type MeasuredCost,
 } from "@/lib/odds-feed/http"
@@ -102,11 +103,15 @@ interface RequestBody {
   eventsOnly?: boolean
 }
 
-function resolveKey(body: RequestBody): string | null {
+/**
+ * The Odds API key to use and where it came from, so a rejection can name the
+ * key that was actually sent rather than leave it to be guessed.
+ */
+function resolveKey(body: RequestBody): ResolvedKey | null {
   return resolveApiKey(process.env.ODDS_API_KEY, body.apiKey, {
     env: "ODDS_API_KEY",
-    settings: "Settings \u2192 Odds feed \u2192 API key",
-  })?.key ?? null
+    settings: "Settings \u2192 Odds feed \u2192 The Odds API key",
+  })
 }
 
 /** The empty-slate note, naming games that were skipped for having started. */
@@ -144,7 +149,8 @@ export async function POST(request: Request) {
   const provider = body.provider === "propline" ? "propline" : "theoddsapi"
   const proplineKeySource = resolveProplineKeySource(body.proplineKey)
   const proplineKey = proplineKeySource?.key ?? null
-  const apiKey = resolveKey(body)
+  const oddsKey = resolveKey(body)
+  const apiKey = oddsKey?.key ?? null
 
   if (provider === "propline" && !proplineKey) {
     return NextResponse.json(
@@ -393,7 +399,8 @@ export async function POST(request: Request) {
       fetchedAt: new Date().toISOString(),
     })
   } catch (err) {
-    return NextResponse.json({ error: feedErrorText(err, "The Odds API") }, { status: 502 })
+    // A refused key names the key that was sent: see oddsApiFailureBody.
+    return NextResponse.json(oddsApiFailureBody(err, oddsKey), { status: 502 })
   }
 }
 
