@@ -21,19 +21,63 @@ export interface ResolvedKey {
   label: string
 }
 
-/**
- * Strip what a copy-paste or a .env line leaves around a key: surrounding
- * whitespace, a wrapping pair of quotes, and a trailing comma from a key
- * lifted out of JSON.
- */
-export function cleanApiKey(raw: string | undefined | null): string {
-  let value = (raw ?? "").trim()
+/** Surrounding whitespace, a trailing comma from a key lifted out of JSON, and a wrapping pair of quotes. */
+function stripWrapping(raw: string): string {
+  let value = raw.trim()
   if (value.endsWith(",")) value = value.slice(0, -1).trim()
   const quoted =
     value.length >= 2 &&
     ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))
   if (quoted) value = value.slice(1, -1).trim()
   return value
+}
+
+/**
+ * Characters a copy picks up from a web page or an email that cannot be seen
+ * and are never part of a key: zero-width spaces and joiners, and the byte
+ * order mark.
+ */
+const INVISIBLE = /[​-‍⁠﻿]/g
+
+/**
+ * The shortest unbroken run taken to be the key when other words came with
+ * it. The words beside a key on an account page are labels, and labels are
+ * short.
+ */
+const MIN_EMBEDDED_KEY = 20
+
+/**
+ * Strip what a copy-paste or a .env line leaves around a key: surrounding
+ * whitespace, a wrapping pair of quotes, a trailing comma from a key lifted
+ * out of JSON, characters that cannot be seen, and whatever the key was
+ * copied along with.
+ *
+ * That last one is the case nothing on screen could show. A key rarely gets
+ * copied alone: an account page prints "API Key" on the line above it, the
+ * vendor's welcome email gives it inside a sample request ("...?apiKey=0123"),
+ * and a line lifted from an env file reads "ODDS_API_KEY=0123". Pasted whole
+ * into a one-line field that is a string the feed has never issued, and the
+ * 401 it earns reads as "your key is wrong" about a key that is right.
+ *
+ * So two shapes are read through. A value that names the key and then gives
+ * it ("apiKey=", "API Key:", "X-API-Key:") is the part after the name. And no
+ * key contains a space, so a value that does is a key plus something: when
+ * exactly one part of it is long enough to be a key, that part is the key.
+ * With none or several there is no telling which, and the value is left for
+ * the feed to refuse and the check in Settings to describe.
+ *
+ * A key that arrives on its own is never touched, whatever its shape.
+ */
+export function cleanApiKey(raw: string | undefined | null): string {
+  const value = stripWrapping((raw ?? "").replace(INVISIBLE, "").replace(/ /g, " "))
+  const named = value.match(/api[\s_-]?key["']?\s*[=:]\s*["']?([^\s"'&#,]+)/i)
+  if (named) return named[1]
+  if (!/\s/.test(value)) return value
+  const candidates = value
+    .split(/\s+/)
+    .map((part) => stripWrapping(part).replace(/[.;:]+$/, ""))
+    .filter((part) => part.length >= MIN_EMBEDDED_KEY)
+  return candidates.length === 1 ? candidates[0] : value
 }
 
 /**
@@ -112,6 +156,31 @@ export class FeedKeyError extends Error {
  */
 export function keyEnding(key: string): string | null {
   return key.length >= 12 ? key.slice(-4) : null
+}
+
+/**
+ * A key described closely enough to recognise and not closely enough to use:
+ * how long it is and how it ends. That is what an account page can be held
+ * against at a glance, and it is all Settings shows of a key while the field
+ * is masked. Only ever for a key that came from Settings, so it is the
+ * caller's own key being described back to them.
+ */
+export function describeKey(key: string): string {
+  const size = `${key.length} character${key.length === 1 ? "" : "s"}`
+  const ending = keyEnding(key)
+  return ending ? `${size}, ending in "${ending}"` : size
+}
+
+/**
+ * Whether a value has the shape of the keys The Odds API issues: 32
+ * characters, each a digit or a letter from a to f.
+ *
+ * Advisory, and used only to explain a refusal. A key is never held back for
+ * its shape, because the shape is what the vendor issues today rather than
+ * something it has promised.
+ */
+export function looksLikeOddsApiKey(key: string): boolean {
+  return /^[0-9a-f]{32}$/i.test(key)
 }
 
 /**

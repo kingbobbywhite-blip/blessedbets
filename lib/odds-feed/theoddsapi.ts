@@ -488,6 +488,16 @@ export function attachQuotes<
 
 const BASE = "https://api.the-odds-api.com/v4"
 
+/**
+ * The sports listing, which the vendor documents as not counting against the
+ * usage quota. It is the request that answers "does the feed accept this key"
+ * without spending anything, and it answers the same in and out of season,
+ * which a league's own events listing is not promised to.
+ */
+export function sportsUrl(apiKey: string): string {
+  return `${BASE}/sports/?apiKey=${encodeURIComponent(apiKey)}`
+}
+
 export function eventsUrl(apiKey: string, league: LeagueId = DEFAULT_LEAGUE): string {
   const sport = leagueFor(league).sportKey
   return `${BASE}/sports/${sport}/events?apiKey=${encodeURIComponent(apiKey)}`

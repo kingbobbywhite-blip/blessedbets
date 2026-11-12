@@ -27,7 +27,9 @@ export function headerCount(headers: Headers, name: string): number | null {
  * key problem: the key is fine and no other key from the same account would
  * do better, so it must not send anyone to Settings to replace it.
  */
-async function describeOddsApiFailure(res: Response): Promise<{ message: string; keyRejected: boolean }> {
+export async function describeOddsApiFailure(
+  res: Response,
+): Promise<{ message: string; keyRejected: boolean; outOfCredits: boolean; detail: string }> {
   const text = await res.text().catch(() => "")
   let detail = text.slice(0, 300)
   let code: string | null = null
@@ -38,8 +40,13 @@ async function describeOddsApiFailure(res: Response): Promise<{ message: string;
   } catch {
     // Not JSON: the raw text is the best there is.
   }
-  const say = (lead: string, keyRejected = false) => ({ message: `${lead} ${detail}`.trim(), keyRejected })
-  if (code === "OUT_OF_USAGE_CREDITS") return say("The Odds API quota is used up for this period.")
+  const say = (lead: string, keyRejected = false, outOfCredits = false) => ({
+    message: `${lead} ${detail}`.trim(),
+    keyRejected,
+    outOfCredits,
+    detail: detail.trim(),
+  })
+  if (code === "OUT_OF_USAGE_CREDITS") return say("The Odds API quota is used up for this period.", false, true)
   if (res.status === 401) return say("The Odds API rejected the API key.", true)
   if (res.status === 429) return say("The Odds API is limiting requests. Wait a minute and try again.")
   return say(`The Odds API returned ${res.status}.`)
@@ -172,6 +179,10 @@ export function sumCosts(costs: MeasuredCost[]): MeasuredCost {
 export function feedErrorText(err: unknown, feed: string): string {
   if (err instanceof TypeError && /fetch failed/i.test(err.message)) {
     return `Could not reach ${feed}. Check the internet connection and try again.`
+  }
+  // A request given a time limit that ran out (AbortSignal.timeout).
+  if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
+    return `${feed} did not answer in time. Try again in a minute.`
   }
   if (err instanceof SyntaxError) return `${feed} sent a response this app could not read. Try again in a minute.`
   return err instanceof Error ? err.message : String(err)

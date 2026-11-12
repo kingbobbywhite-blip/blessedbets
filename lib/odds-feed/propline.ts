@@ -7,7 +7,7 @@ export { sameGameId, teamNickname } from "./games"
 import { attributedGames, teamNickname } from "./games"
 import type { PickType } from "@/lib/store/schema"
 import { feedKeyFor, feedMarketFor, normalizeEventOdds, sportOfFeedKey, type NormalizeResult } from "./theoddsapi"
-import { feedErrorText, notStarted } from "./http"
+import { feedErrorText, headerCount, notStarted } from "./http"
 import { FeedKeyError, keySourceHint, resolveKey, type ResolvedKey } from "./api-key"
 import type { FeedBookmaker, FeedEvent, FeedEventOdds, FeedOutcome } from "./types"
 
@@ -394,14 +394,27 @@ export interface ProplineQuota {
   remaining: number
 }
 
-/** Daily quota from the X-Daily-* headers, or null when they are absent. */
+/**
+ * Daily quota from the response headers, or null when they do not say.
+ *
+ * PropLine's own X-Daily-* headers first. Where those are absent, the
+ * standard rate-limit headers it also sends are read instead: its responses
+ * carry "RateLimit-Policy: 1000;w=86400", a limit over a day, which is the
+ * same allowance under another name. Without the fallback a pull whose
+ * responses carried only those said nothing about what was left.
+ */
 export function proplineQuota(headers: Headers): ProplineQuota | null {
-  if (!headers.has("X-Daily-Limit")) return null
-  const limit = Number(headers.get("X-Daily-Limit"))
-  const used = Number(headers.get("X-Daily-Used"))
-  const remaining = Number(headers.get("X-Daily-Remaining"))
-  if (![limit, used, remaining].every(Number.isFinite)) return null
-  return { limit, used, remaining }
+  if (headers.has("X-Daily-Limit")) {
+    const limit = Number(headers.get("X-Daily-Limit"))
+    const used = Number(headers.get("X-Daily-Used"))
+    const remaining = Number(headers.get("X-Daily-Remaining"))
+    if (![limit, used, remaining].every(Number.isFinite)) return null
+    return { limit, used, remaining }
+  }
+  const limit = headerCount(headers, "RateLimit-Limit") ?? headerCount(headers, "X-RateLimit-Limit")
+  const remaining = headerCount(headers, "RateLimit-Remaining") ?? headerCount(headers, "X-RateLimit-Remaining")
+  if (limit == null || remaining == null) return null
+  return { limit, used: Math.max(0, limit - remaining), remaining }
 }
 
 /**
@@ -461,7 +474,7 @@ function describeFailure(
   text: string,
   status: number,
   key: ResolvedKey | null,
-): { message: string; keyRejected: boolean } {
+): { message: string; keyRejected: boolean; outOfRequests?: boolean; said?: string } {
   const parsed = parseProplineError(text)
   // Fall back to the raw body only when nothing could be read out of it, and
   // never to raw JSON: an unparsed object is noise to whoever reads the screen.
@@ -477,7 +490,7 @@ function describeFailure(
   const where = keySourceHint(key)
 
   if (parsed.code === "missing_api_key") {
-    return { message: sentence("PropLine received no API key.", detail, where), keyRejected: true }
+    return { message: sentence("PropLine received no API key.", detail, where), keyRejected: true, said }
   }
   if (status === 401 || parsed.code === "invalid_api_key") {
     return {
@@ -490,6 +503,7 @@ function describeFailure(
         "A key is free at prop-line.com and gives 1,000 requests a day; check the one in use against it.",
       ),
       keyRejected: true,
+      said,
     }
   }
   // A 404 names the path, and every path this adapter builds starts with a
@@ -505,15 +519,34 @@ function describeFailure(
       keyRejected: false,
     }
   }
+  const outOfRequests =
+    parsed.code !== "burst_limit_exceeded" &&
+    parsed.code !== "upgrade_required" &&
+    (status === 429 || parsed.code === "daily_limit_exceeded")
   const message =
     parsed.code === "burst_limit_exceeded"
       ? sentence("PropLine is limiting requests. Wait a few seconds and try again.", detail)
       : parsed.code === "upgrade_required"
         ? sentence("This needs a paid PropLine plan.", detail)
-        : status === 429 || parsed.code === "daily_limit_exceeded"
+        : outOfRequests
           ? sentence("PropLine's daily request limit is used up. It resets at 00:00 UTC.", detail)
           : sentence(`PropLine returned ${status}.`, detail)
-  return { message, keyRejected: false }
+  return { message, keyRejected: false, outOfRequests, said }
+}
+
+/**
+ * The same reading of a failed PropLine response, for a caller that needs to
+ * know what kind of failure it was rather than only what to print: the key
+ * check in Settings tells a refused key from a used-up day from an outage.
+ * `said` is PropLine's own sentence, when it sent one.
+ */
+export async function describeProplineFailure(
+  res: Response,
+  key?: ResolvedKey | null,
+): Promise<{ message: string; keyRejected: boolean; outOfRequests: boolean; said: string }> {
+  const text = await res.text().catch(() => "")
+  const d = describeFailure(text, res.status, key ?? null)
+  return { message: d.message, keyRejected: d.keyRejected, outOfRequests: !!d.outOfRequests, said: d.said ?? "" }
 }
 
 /** A readable sentence from a failed PropLine response, saying what to do about it. */

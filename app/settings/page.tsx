@@ -2,7 +2,8 @@
 
 import * as React from "react"
 import { toast } from "sonner"
-import { Download, RotateCcw, TriangleAlert, Upload } from "lucide-react"
+import { Download, Eraser, RotateCcw, TriangleAlert, Upload } from "lucide-react"
+import { FeedKeyField } from "@/components/feed-key-field"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -65,6 +66,18 @@ export default function SettingsPage() {
 
   if (!ready) {
     return <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground">Loading…</p>
+  }
+
+  /**
+   * Exchange the two keys. The fields are masked and sit one above the other,
+   * so a key pasted into the wrong one looks exactly like a key pasted into
+   * the right one until its feed refuses it, which is when this is offered.
+   */
+  function swapKeys() {
+    setSettings((p) => ({
+      ...p,
+      oddsFeed: { ...p.oddsFeed, apiKey: p.oddsFeed.proplineKey, proplineKey: p.oddsFeed.apiKey },
+    }))
   }
 
   function exportJson() {
@@ -333,29 +346,26 @@ export default function SettingsPage() {
               </p>
             </div>
 
-            <div>
-              <Label className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                PropLine key
-              </Label>
-              <Input
-                type="password"
-                value={s.oddsFeed.proplineKey}
-                onChange={(e) =>
-                  setSettings((p) => ({ ...p, oddsFeed: { ...p.oddsFeed, proplineKey: e.target.value } }))
-                }
-                placeholder="prop-line.com key"
-                className="mt-1.5 font-mono text-xs"
-              />
-              <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                Free at{" "}
-                <a href="https://prop-line.com" target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">
-                  prop-line.com
-                </a>
-                . Stored in this browser and sent only to PropLine, through this app&apos;s server. PROPLINE_API_KEY in the
-                environment takes precedence.
-              </p>
-              {serverKeys?.propline ? <ServerKeyNotice name="PROPLINE_API_KEY" /> : null}
-            </div>
+            <FeedKeyField
+              feed="propline"
+              label="PropLine key"
+              value={s.oddsFeed.proplineKey}
+              onChange={(v) => setSettings((p) => ({ ...p, oddsFeed: { ...p.oddsFeed, proplineKey: v } }))}
+              placeholder="prop-line.com key"
+              envName="PROPLINE_API_KEY"
+              serverHasKey={serverKeys ? serverKeys.propline : null}
+              league={s.daily.league}
+              onSwap={swapKeys}
+              swapLabel={s.oddsFeed.apiKey.trim() ? "Swap the two keys" : "Move it to The Odds API field"}
+            >
+              Free at{" "}
+              <a href="https://prop-line.com" target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">
+                prop-line.com
+              </a>
+              . Stored in this browser and sent only to PropLine, through this app&apos;s server. Pasting replaces
+              whatever was in the field, and PropLine is asked straight away whether it knows the key.
+              PROPLINE_API_KEY in the environment takes precedence.
+            </FeedKeyField>
 
             <div className="flex items-start justify-between gap-3 rounded-lg border border-border/50 p-3">
               <div>
@@ -375,22 +385,46 @@ export default function SettingsPage() {
               />
             </div>
 
-            <div>
-              <Label className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                The Odds API key
-              </Label>
-              <Input
-                type="password"
-                value={s.oddsFeed.apiKey}
-                onChange={(e) => setSettings((p) => ({ ...p, oddsFeed: { ...p.oddsFeed, apiKey: e.target.value } }))}
-                placeholder="the-odds-api.com key"
-                className="mt-1.5 font-mono text-xs"
-              />
-              <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                Stored in this browser and sent only to the odds feed, through this app's own server so it never appears
-                in page JavaScript. You can also set ODDS_API_KEY in the environment instead, which takes precedence.
+            <FeedKeyField
+              feed="theoddsapi"
+              label="The Odds API key"
+              value={s.oddsFeed.apiKey}
+              onChange={(v) => setSettings((p) => ({ ...p, oddsFeed: { ...p.oddsFeed, apiKey: v } }))}
+              placeholder="the-odds-api.com key"
+              envName="ODDS_API_KEY"
+              serverHasKey={serverKeys ? serverKeys.oddsApi : null}
+              league={s.daily.league}
+              onSwap={swapKeys}
+              swapLabel={s.oddsFeed.proplineKey.trim() ? "Swap the two keys" : "Move it to the PropLine field"}
+            >
+              From{" "}
+              <a href="https://the-odds-api.com" target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">
+                the-odds-api.com
+              </a>
+              . Stored in this browser and sent only to the odds feed, through this app&apos;s own server so it never
+              appears in page JavaScript. Checking it is free: the request that asks is not counted against the
+              monthly quota. You can also set ODDS_API_KEY in the environment instead, which takes precedence.
+            </FeedKeyField>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/50 p-3">
+              <p className="max-w-xl text-[11px] leading-relaxed text-muted-foreground">
+                Keys are kept per browser and per address: a phone, another browser, or this app opened at a different
+                address each hold their own, and one that still has an old key goes on sending it. Starting over with
+                new keys? Forget both, then paste each new key once.
               </p>
-              {serverKeys?.oddsApi ? <ServerKeyNotice name="ODDS_API_KEY" /> : null}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="font-mono text-[11px]"
+                disabled={!s.oddsFeed.apiKey && !s.oddsFeed.proplineKey}
+                onClick={() => {
+                  setSettings((p) => ({ ...p, oddsFeed: { ...p.oddsFeed, apiKey: "", proplineKey: "" } }))
+                  toast.success("Both keys forgotten in this browser. Paste the new ones in.")
+                }}
+              >
+                <Eraser className="size-3.5" /> Forget both keys
+              </Button>
             </div>
 
             <div>
@@ -743,28 +777,6 @@ export default function SettingsPage() {
         </TabsContent>
       </Tabs>
     </div>
-  )
-}
-
-/**
- * Says that the key in the field above is not the one being sent.
- *
- * A key in the server's environment outranks the one typed here, and nothing
- * on this screen showed that it did: the field took a new key, kept it, and
- * every pull went on sending the environment's. A feed that then rejects the
- * key reads as "the key I just typed is wrong", which no amount of retyping
- * or regenerating can fix.
- */
-function ServerKeyNotice({ name }: { name: string }) {
-  return (
-    <p role="note" className="mt-1.5 flex items-start gap-1.5 text-[11px] leading-relaxed text-accent">
-      <TriangleAlert className="mt-0.5 size-3 shrink-0" />
-      <span>
-        This server has {name} set in its environment, and that is the key every pull sends. A key typed here is
-        kept but not used until {name} is removed there: on Vercel, under the project&apos;s Settings → Environment
-        Variables, followed by a redeploy; on your own machine, in .env.local, followed by a restart.
-      </span>
-    </p>
   )
 }
 
