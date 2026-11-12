@@ -192,6 +192,34 @@ phone onto a feed it has no key for.
 The same caution about public deployments applies: leave `PROPLINE_API_KEY` unset on an
 unprotected URL and enter the key in Settings instead.
 
+**Settings tells you whether a key works, as you paste it.** Each key field asks its own feed
+whether it knows the key, about exactly the key a pull would send, and says so underneath: accepted,
+with the requests left on it, or refused, in the feed's own words. Asking The Odds API is free (its
+sports listing is not counted against the quota); asking PropLine is the listing a pull starts
+with, at most one request of the 1,000. So a key problem shows up in Settings in a second rather
+than as a failed pull on Today. **Test key** asks again on demand.
+
+Three things about those fields are deliberate, each for a way of holding the wrong key that
+looked exactly like holding the right one:
+
+- **A paste replaces the field.** Pasting a new key into a field that still held the old one put
+  the new key inside or after it, and the masked field only showed more dots: sixty-four
+  characters where thirty-two were meant, refused by the feed, with an "ends in" that matched the
+  new key because the new key was the end of it. A paste is now the whole key.
+- **What is saved is shown.** Under each field: how long the saved key is, its last four
+  characters, and the address it is saved for. Keys are kept per browser *and per address*, so the
+  production URL, a preview URL, a phone and the home-screen app each hold their own. **Show**
+  reveals the key itself.
+- **It is not a password field.** A password manager offers to save what is typed into one and
+  puts a saved value back later, and here every change to the field is a change to the stored
+  key. The dots are drawn by the stylesheet instead.
+
+A key copied with something around it is read through: the label above it on the account page,
+the sample request in the welcome email (`...?apiKey=...`), a line from an env file, quotes, a
+trailing newline, characters that cannot be seen. If a feed refuses a key, **Swap the two keys**
+is offered beside the refusal, since the two fields sit one above the other and a key in the
+wrong one looks no different. **Forget both keys** clears them to start over.
+
 **"PropLine rejected the API key"** means PropLine received a key and did not recognise it,
 so the fix is the key itself, not the app. The message names where the key it sent came
 from. Three things cause it:
@@ -229,7 +257,7 @@ A used-up quota comes back from The Odds API with the same status as a bad key. 
 as a quota, and is not a reason to replace the key.
 
 ```bash
-npm test         # 831 unit tests over the probability engine, the feeds and screenshot reading
+npm test         # 868 unit tests over the probability engine, the feeds and screenshot reading
 npm run lint
 npm run build
 ```

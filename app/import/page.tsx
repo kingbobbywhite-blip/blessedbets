@@ -24,6 +24,7 @@ import {
 } from "@/lib/import/draft"
 import { feedKeyFor } from "@/lib/odds-feed/theoddsapi"
 import { attachQuotes, indexQuotes, type NormalizedQuote } from "@/lib/odds-feed/theoddsapi"
+import { readApiJson } from "@/lib/api-response"
 import { useStore } from "@/lib/store/provider"
 import { LEAGUES, LEAGUE_IDS, leagueFor, maxGamesForLeague, type LeagueId } from "@/lib/leagues"
 
@@ -212,7 +213,10 @@ export default function ImportPage() {
           bookmakers: state.settings.oddsFeed.books,
         }),
       })
-      const data = await res.json()
+      // Not res.json(): a response that is not JSON (an expired sign-in, a
+      // request the host cut off) says what it is instead of a parser error.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data = await readApiJson<Record<string, any>>(res)
       if (!res.ok) {
         setOddsReport({ matched: 0, unmatched: [], remaining: null, error: data.error ?? `Request failed (${res.status}).` })
         return

@@ -50,6 +50,7 @@ import { PROPLINE_FREE_DAILY } from "@/lib/odds-feed/propline"
 import { NO_SERVER_KEYS, hasFeedKey } from "@/lib/odds-feed/keys"
 import { usableKey } from "@/lib/odds-feed/api-key"
 import { notStarted } from "@/lib/odds-feed/http"
+import { readApiJson } from "@/lib/api-response"
 import { useStore } from "@/lib/store/provider"
 import { marketsFor } from "@/lib/store/schema"
 import {
@@ -76,6 +77,14 @@ function nextGameText(e: { commence_time: string; home_team: string; away_team: 
   })
   return `${e.away_team} at ${e.home_team}, ${when}`
 }
+
+/**
+ * What /api/today answers with. Untyped on purpose: it was read with
+ * res.json(), which is `any`, and every field below is defaulted where it is
+ * used because an older server or a failed pull sends only some of them.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type TodayResponse = Record<string, any>
 
 /** "prizepicks" to "PrizePicks", for the pick'em apps PropLine carries. */
 function appName(id: string): string {
@@ -478,7 +487,10 @@ export default function TodayPage() {
           maxGames: s.daily.maxGames,
         }),
       })
-      const data = await res.json()
+      // Read as text first: a response that is not JSON is an expired sign-in
+      // or a request the host cut off, and it says so instead of surfacing a
+      // parser error about an unexpected "<".
+      const data = await readApiJson<TodayResponse>(res)
       if (!res.ok) {
         // An upgrade moved this install to PropLine on a key it could not
         // check, and PropLine has now refused it. Undo the app's own guess
@@ -581,7 +593,15 @@ export default function TodayPage() {
       if (data.marketsNote) toast.warning(data.marketsNote)
       if (data.creditNote) toast.info(data.creditNote)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      // fetch itself failing is this browser not reaching the app's server:
+      // "Failed to fetch" names neither end of that.
+      setError(
+        err instanceof TypeError
+          ? "Could not reach this app's server. Check the internet connection and try again."
+          : err instanceof Error
+            ? err.message
+            : String(err),
+      )
     } finally {
       setBusy(false)
     }
