@@ -14,6 +14,8 @@ export default defineConfig(
     "next-env.d.ts",
     // Vendored, minified Tesseract worker and WASM loaders served as-is.
     "public/tesseract/**",
+    // A separate project with its own dependencies, checks and CI job.
+    "switchboard/**",
   ]),
   tseslint.configs.recommended,
   reactHooks.configs.flat.recommended,

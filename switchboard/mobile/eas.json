@@ -1,0 +1,19 @@
+{
+  "cli": { "version": ">= 16.0.0", "appVersionSource": "local" },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": { "SWITCHBOARD_PUBLIC_URL": "" }
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": { "buildType": "apk" },
+      "env": { "SWITCHBOARD_PUBLIC_URL": "https://REPLACE-ME.your-tailnet.ts.net" }
+    },
+    "production": {
+      "android": { "buildType": "apk" },
+      "env": { "SWITCHBOARD_PUBLIC_URL": "https://REPLACE-ME.your-tailnet.ts.net" }
+    }
+  }
+}

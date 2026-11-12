@@ -406,6 +406,10 @@ seventeen points, which is more than enough to talk you out of entries that are 
 - [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md) — how every number is computed.
 - [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md) — what this cannot do, and where it can
   mislead you. Read this one before betting real money.
+- [`switchboard/README.md`](switchboard/README.md) — Switchboard, a separate tool kept in this
+  repository: one hub for running and talking to all your Claude Code sessions, from a browser
+  or by voice from your phone. It is not part of the app, has its own dependencies and checks,
+  and is never deployed with it.
 
 ## Legal and practical
 
