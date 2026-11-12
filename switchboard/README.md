@@ -150,31 +150,31 @@ a private network between your own devices, so your phone reaches it on Wi-Fi or
 without anything being opened to the internet.
 
 1. Install Tailscale on your phone (App Store or Play Store) and sign in.
-2. Install it on the computer and sign in with the **same account**.
-   - **Mac:** download it from [tailscale.com/download](https://tailscale.com/download). If
-     Terminal later says `command not found: tailscale`, turn on the command-line tool (CLI)
-     in the Tailscale app's settings.
+2. Install it on the computer, open it, and sign in with the **same account**. It should say
+   Connected.
+   - **Mac:** download it from [tailscale.com/download/mac](https://tailscale.com/download/mac).
    - **Windows:** install it inside Ubuntu, where Switchboard runs:
 
      ```bash
      curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up
      ```
 
-3. Give Switchboard an https address on your Tailscale network (on Windows, put `sudo` in
-   front):
+     and allow yourself to change its settings without sudo:
+
+     ```bash
+     sudo tailscale set --operator=$USER
+     ```
+
+3. Give Switchboard its private https address and save it:
 
    ```bash
-   tailscale serve --bg 7700
+   switchboard tailscale
    ```
 
-   If it asks you to enable HTTPS for your tailnet, open the link it shows, turn it on, and run
-   it again. It prints your address, something like `https://your-mac.tail1234.ts.net`.
-
-4. Tell Switchboard that address. Paste yours in place of the example:
-
-   ```bash
-   echo "SWITCHBOARD_PUBLIC_URL=https://your-mac.tail1234.ts.net" >> ~/blessedbets/switchboard/.env
-   ```
+   It finds Tailscale even when Terminal says `command not found: tailscale` (the Mac app keeps
+   its command inside the app), and writes the address into `switchboard/.env` for you. If it
+   asks you to enable HTTPS for your tailnet, open the link it shows, turn it on, and run it
+   again.
 
 ### 5. Start it
 

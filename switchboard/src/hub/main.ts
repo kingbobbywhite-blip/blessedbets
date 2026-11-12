@@ -1,5 +1,5 @@
 import { Bus } from './bus.ts'
-import { loadConfig } from './config.ts'
+import { isExampleUrl, loadConfig } from './config.ts'
 import { openDatabase } from './db.ts'
 import { Hub } from './hub.ts'
 import { buildServer, VERSION } from './server.ts'
@@ -31,7 +31,9 @@ export async function startHub(env: NodeJS.ProcessEnv = process.env) {
       '',
       `  Switchboard ${VERSION}`,
       `  Web UI:     ${local}/#token=${cfg.token}`,
-      cfg.publicUrl ? `  Phone:      ${cfg.publicUrl}  (run "switchboard pair" for a QR code)` : `  Phone:      set SWITCHBOARD_PUBLIC_URL (e.g. your Tailscale https address), then "switchboard pair"`,
+      cfg.publicUrl && !isExampleUrl(cfg.publicUrl)
+        ? `  Phone:      ${cfg.publicUrl}  (run "switchboard pair" for a QR code)`
+        : `  Phone:      no Tailscale address yet: run "switchboard tailscale", then "switchboard pair"`,
       `  Database:   ${db.description}`,
       `  tmux:       ${(await tmux.available()) ?? 'NOT FOUND - install tmux to start sessions'}`,
       `  Speech:     ${cfg.stt ? `${cfg.stt.baseUrl} (${cfg.stt.model})` : 'on-device only (set OPENAI_API_KEY or STT_BASE_URL for hub transcription)'}`,

@@ -10,7 +10,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
 import QRCode from 'qrcode'
-import { loadConfig, PACKAGE_ROOT, type Config } from './hub/config.ts'
+import { isExampleUrl, loadConfig, PACKAGE_ROOT, setEnvVar, type Config } from './hub/config.ts'
 import { Tmux, shellQuote } from './hub/tmux.ts'
 import { updateIdFor, updatesRoot } from './hub/updates.ts'
 import type { Message, SearchHit, Session, Task } from './shared/protocol.ts'
@@ -22,6 +22,7 @@ Running it
   start                   Run the hub in this terminal
   down                    Stop the hub (sessions keep running; --all stops them too)
   doctor                  Check tmux, claude, Node, the database, speech, the phone address
+  tailscale               Give Switchboard a private https address on Tailscale and save it
   pair                    QR codes for the phone app and for a browser
   flic                    The Flic button links (push to talk)
   install-mcp             Add the Switchboard channel to every Claude Code session you start by hand
@@ -148,9 +149,10 @@ switch (cmd) {
       console.log(`${r.session.name}: ${r.note}`)
       if (r.screen) console.log(r.screen)
     }
+    if (isExampleUrl(cfg.publicUrl)) console.log(`\nNote: ${cfg.publicUrl} is the example address, not yours. Run: switchboard tailscale`)
     console.log(`\nWeb UI: ${base}/#token=${cfg.token}`)
     console.log(`Orchestrator terminal: switchboard attach ${cfg.orchestrator}`)
-    console.log(cfg.publicUrl ? `Phone: switchboard pair` : `Phone: set SWITCHBOARD_PUBLIC_URL first (see README), then switchboard pair`)
+    console.log(cfg.publicUrl && !isExampleUrl(cfg.publicUrl) ? `Phone: switchboard pair` : `Phone: run switchboard tailscale first, then switchboard pair`)
     break
   }
 
@@ -338,8 +340,9 @@ switch (cmd) {
 
   case 'pair': {
     const p = await api('GET', '/api/pair')
-    if (!cfg.publicUrl) {
-      console.log('Note: SWITCHBOARD_PUBLIC_URL is not set, so this uses the local address, which a phone off this computer cannot reach.\n')
+    if (!cfg.publicUrl || isExampleUrl(cfg.publicUrl)) {
+      console.log('Note: no Tailscale address is set yet, so these codes point at an address your phone cannot reach.')
+      console.log('Run "switchboard tailscale" first (then "switchboard down && switchboard up"), and pair again.\n')
     }
     console.log('Phone app: open Switchboard and scan this\n')
     console.log(await QRCode.toString(p.app_url, { type: 'terminal', small: true }))
@@ -356,6 +359,49 @@ switch (cmd) {
     console.log(`  Double click  cancel / hush    ${p.flic.cancel}`)
     console.log(`  Hold          start talking    ${p.flic.start}`)
     console.log(`\nThe press is sent to the phone that has walk mode on. With a Flic Hub, flic/hub-sdk-ptt.js gives true hold-to-talk.`)
+    break
+  }
+
+  case 'tailscale': {
+    const bin = findTailscale()
+    if (!bin) {
+      fail(
+        [
+          'Tailscale is not installed on this computer.',
+          '  Mac: download it from https://tailscale.com/download/mac, open it, and log in',
+          '       with the same account as your phone.',
+          '  Linux or Windows (Ubuntu): curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up',
+          'Then run: switchboard tailscale',
+        ].join('\n'),
+      )
+    }
+    let status: { BackendState?: string; Self?: { DNSName?: string } } | null = null
+    try {
+      status = JSON.parse(spawnSync(bin, ['status', '--json'], { encoding: 'utf8', timeout: 15000 }).stdout)
+    } catch {
+      status = null
+    }
+    if (!status || status.BackendState !== 'Running') {
+      fail(
+        `Tailscale is installed but not connected (${status?.BackendState ?? 'not running'}). Open the Tailscale app, ` +
+          'log in with the same account as your phone, make sure it says Connected, then run this again.',
+      )
+    }
+    const dns = String(status.Self?.DNSName ?? '').replace(/\.$/, '')
+    if (!dns) fail("Tailscale did not report this computer's name. Turn on MagicDNS (the DNS page of the Tailscale admin console), then run this again.")
+    const url = `https://${dns}`
+    console.log(`Making Switchboard reachable at ${url}, for your own devices on Tailscale only...\n`)
+    const serve = spawnSync(bin, ['serve', '--bg', String(cfg.port)], { stdio: 'inherit' })
+    if (serve.status !== 0) {
+      fail(
+        process.platform === 'linux'
+          ? 'tailscale serve did not work (see above). On Linux it needs permission once: sudo tailscale set --operator=$USER, then run this again.'
+          : 'tailscale serve did not work (see above). If it asked you to enable HTTPS for your tailnet, open that link, turn it on, then run this again.',
+      )
+    }
+    setEnvVar('SWITCHBOARD_PUBLIC_URL', url)
+    console.log(`\nSaved SWITCHBOARD_PUBLIC_URL=${url} in ${path.join(PACKAGE_ROOT, '.env')}`)
+    console.log((await hubUp()) ? 'The hub is running: restart it so it uses the address: switchboard down && switchboard up' : 'Next: switchboard up')
     break
   }
 
@@ -407,8 +453,15 @@ async function doctor(c: Config) {
     const devices = await api<{ name: string; online: boolean; push_token: string | null }[]>('GET', '/api/devices')
     ok('Phones', devices.length > 0, devices.length ? devices.map(d => `${d.name}${d.online ? ' (online)' : ''}${d.push_token ? ' push' : ''}`).join(', ') : 'none paired (switchboard pair)')
   }
-  ok('Phone address', Boolean(c.publicUrl), c.publicUrl ?? 'SWITCHBOARD_PUBLIC_URL not set (see README: Tailscale)')
-  if (c.publicUrl) {
+  const example = isExampleUrl(c.publicUrl)
+  ok(
+    'Phone address',
+    Boolean(c.publicUrl) && !example,
+    example
+      ? `${c.publicUrl} is the example address from the instructions. Run: switchboard tailscale`
+      : (c.publicUrl ?? 'not set. Run: switchboard tailscale'),
+  )
+  if (c.publicUrl && !example) {
     try {
       const r = await fetch(`${c.publicUrl}/api/health`, { signal: AbortSignal.timeout(5000) })
       ok('  reachable', r.ok, r.ok ? 'yes' : `HTTP ${r.status}`)
@@ -424,7 +477,8 @@ async function appCommand(args: string[]) {
   const mobile = path.join(PACKAGE_ROOT, 'mobile')
   if (sub === 'setup') {
     // EAS builds run on Expo's servers, which never see switchboard/.env: the address goes in eas.json.
-    const url = cfg.publicUrl ?? fail('Set SWITCHBOARD_PUBLIC_URL in switchboard/.env first (README, step 4).')
+    const url = cfg.publicUrl ?? fail('No hub address yet. Run: switchboard tailscale')
+    if (isExampleUrl(url)) fail(`${url} is the example address from the instructions. Run: switchboard tailscale`)
     const file = path.join(mobile, 'eas.json')
     const eas = JSON.parse(fs.readFileSync(file, 'utf8')) as { build: Record<string, { env?: Record<string, string> }> }
     for (const profile of Object.keys(eas.build)) {
@@ -492,6 +546,16 @@ async function appCommand(args: string[]) {
     return
   }
   fail('usage: switchboard app setup|publish|list|rollback|native')
+}
+
+/** The tailscale command: on the PATH, or inside the Mac app, which does not put it on the PATH. */
+function findTailscale(): string | null {
+  const candidates = ['tailscale', '/Applications/Tailscale.app/Contents/MacOS/Tailscale', '/usr/local/bin/tailscale', '/opt/homebrew/bin/tailscale']
+  for (const c of candidates) {
+    const r = spawnSync(c, ['version'], { encoding: 'utf8', timeout: 15000 })
+    if (!r.error && r.status === 0) return c
+  }
+  return null
 }
 
 function gitSummary(): string {

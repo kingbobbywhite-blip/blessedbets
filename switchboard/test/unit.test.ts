@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { splitArgs, tokenMatches } from '../src/hub/config.ts'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { isExampleUrl, setEnvVar, splitArgs, tokenMatches } from '../src/hub/config.ts'
 import { detectDialog, keysToChoose, parseOptions, screenStatus } from '../src/hub/dialogs.ts'
 import { channelWarning } from '../src/hub/sessions.ts'
 import { shellQuote } from '../src/hub/tmux.ts'
@@ -140,6 +143,14 @@ describe('small helpers', () => {
     assert.deepEqual(splitArgs(`--model opus --append "two words" 'single quoted'`), ['--model', 'opus', '--append', 'two words', 'single quoted'])
     assert.equal(shellQuote("it's"), `'it'\\''s'`)
     assert.equal(shellQuote('/plain/path'), '/plain/path')
+  })
+  it('replaces the example address in .env instead of adding a second one', () => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'sb-env-')), '.env')
+    fs.writeFileSync(file, 'OPENAI_API_KEY=x\nSWITCHBOARD_PUBLIC_URL=https://your-mac.tail1234.ts.net\n')
+    assert.ok(isExampleUrl('https://your-mac.tail1234.ts.net'))
+    setEnvVar('SWITCHBOARD_PUBLIC_URL', 'https://bobs-mac.tail9f2c.ts.net', file)
+    assert.equal(fs.readFileSync(file, 'utf8'), 'OPENAI_API_KEY=x\nSWITCHBOARD_PUBLIC_URL=https://bobs-mac.tail9f2c.ts.net\n')
+    assert.ok(!isExampleUrl('https://bobs-mac.tail9f2c.ts.net'))
   })
   it('compares tokens', () => {
     assert.ok(tokenMatches('abc', 'abc'))

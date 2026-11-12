@@ -119,6 +119,21 @@ export function splitArgs(input: string): string[] {
   return out
 }
 
+/** The placeholder address from the instructions, pasted as-is. */
+export function isExampleUrl(url: string | null | undefined): boolean {
+  return Boolean(url && /your-mac\.tail1234|REPLACE-ME|your-tailnet|PASTE/i.test(url))
+}
+
+/** Set one KEY=value line in switchboard/.env, replacing any earlier line for that key. */
+export function setEnvVar(key: string, value: string, file = path.join(PACKAGE_ROOT, '.env')): void {
+  const lines = fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split(/\r?\n/) : []
+  const kept = lines.filter(l => !new RegExp(`^\\s*${key}\\s*=`).test(l))
+  while (kept.length && kept[kept.length - 1].trim() === '') kept.pop()
+  kept.push(`${key}=${value}`)
+  fs.writeFileSync(file, kept.join('\n') + '\n', { mode: 0o600 })
+  fs.chmodSync(file, 0o600)
+}
+
 /** Constant-time token check. */
 export function tokenMatches(expected: string, given: string | undefined | null): boolean {
   if (!given) return false
