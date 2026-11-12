@@ -50,6 +50,7 @@ History
   search <words...> [--session NAME]
 
 Phone app
+  app setup               Point the app's builds (mobile/eas.json) at SWITCHBOARD_PUBLIC_URL
   app publish [--message TEXT] [--platform ios,android]   Over-the-air update every paired phone picks up by itself
   app list
   app rollback [--platform ios|android]
@@ -421,6 +422,19 @@ async function doctor(c: Config) {
 async function appCommand(args: string[]) {
   const sub = args[0]
   const mobile = path.join(PACKAGE_ROOT, 'mobile')
+  if (sub === 'setup') {
+    // EAS builds run on Expo's servers, which never see switchboard/.env: the address goes in eas.json.
+    const url = cfg.publicUrl ?? fail('Set SWITCHBOARD_PUBLIC_URL in switchboard/.env first (README, step 4).')
+    const file = path.join(mobile, 'eas.json')
+    const eas = JSON.parse(fs.readFileSync(file, 'utf8')) as { build: Record<string, { env?: Record<string, string> }> }
+    for (const profile of Object.keys(eas.build)) {
+      eas.build[profile].env = { ...(eas.build[profile].env ?? {}), SWITCHBOARD_PUBLIC_URL: url }
+    }
+    fs.writeFileSync(file, JSON.stringify(eas, null, 2) + '\n')
+    console.log(`The phone app will be built for ${url} (mobile/eas.json).`)
+    console.log(`Next: cd ${mobile} && npm install && npx eas-cli build --platform android --profile preview`)
+    return
+  }
   if (sub === 'publish') {
     const { values } = flags(args.slice(1), { message: { type: 'string' }, platform: { type: 'string' } })
     if (!fs.existsSync(path.join(mobile, 'node_modules'))) fail(`Install the app's dependencies first: cd ${mobile} && npm install`)
@@ -477,7 +491,7 @@ async function appCommand(args: string[]) {
     console.log(`Offered Android build ${b.version} (sha256 ${b.sha256.slice(0, 12)}…). Phones see it under Settings → App updates.`)
     return
   }
-  fail('usage: switchboard app publish|list|rollback|native')
+  fail('usage: switchboard app setup|publish|list|rollback|native')
 }
 
 function gitSummary(): string {

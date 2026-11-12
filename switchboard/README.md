@@ -46,42 +46,137 @@ What it does:
 
 ---
 
-## What you need
+## Start here: where all this runs
 
-- macOS or Linux, with **Node 22.18+** and **tmux 3.0+** (`brew install node tmux`).
-- **Claude Code 2.1.80 or newer**, logged in with a claude.ai account or a Console API key.
-  Channels are a research preview: on a claude.ai **Team or Enterprise** plan an Owner must
-  turn them on (Organization settings → Claude Code → Channels). Pro and Max need nothing.
-- **Tailscale** (free) on the computer and the phone, so the phone reaches the hub from
-  anywhere without opening anything to the internet. Any other way to reach the hub works.
-- Postgres is **built in**: with no `DATABASE_URL`, the hub runs a real Postgres from the
-  `embedded-postgres` package in `~/.switchboard/postgres`. Point `DATABASE_URL` at your own
-  if you prefer (`docker compose up -d` here starts one).
+**On your own computer**: the one you run Claude Code on, and one you can leave switched on
+while you are out (a desktop, or a laptop left open and plugged in). Switchboard and every
+Claude Code session run there. Your phone only connects to it.
 
-## Set it up
+Not on your phone, and not in a Claude Code cloud session on claude.ai: those are temporary
+machines that are deleted when you are done, and they cannot keep your sessions running or see
+your files.
+
+**Every command below is typed into a terminal on that computer**, one grey box at a time,
+pressing Return after each:
+
+- **Mac:** the **Terminal** app. Press ⌘-Space, type `Terminal`, press Return.
+- **Windows:** Switchboard needs tmux, which only exists on Mac and Linux, so on Windows it
+  runs inside **WSL** (Linux built into Windows). After step 1 your terminal is the **Ubuntu**
+  app in the Start menu, and Claude Code has to be installed in there as well.
+- **Linux:** any terminal.
+
+You can close the terminal window afterwards: Switchboard and your sessions keep running in
+the background (in tmux) until you restart the computer.
+
+### 1. Install the tools (once)
+
+**Mac.** Install Homebrew. It asks for your Mac password, and when it finishes it prints
+"Next steps" with two or three commands: run those too.
 
 ```bash
-cd switchboard
-npm install
-npm link            # puts `switchboard` on your PATH (or: alias switchboard="$PWD/bin/switchboard")
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+Then Node, tmux and git:
+
+```bash
+brew install node tmux git
+```
+
+**Windows.** Right-click the Start button, choose **Terminal (Admin)**, and run:
+
+```powershell
+wsl --install
+```
+
+Restart the PC, open **Ubuntu** from the Start menu, and choose a username and password. From
+now on, type everything into that Ubuntu window:
+
+```bash
+sudo apt update && sudo apt install -y tmux git curl
+```
+
+```bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+```
+
+Close Ubuntu, open it again, then:
+
+```bash
+nvm install 22
+```
+
+**Both.** In that same terminal, install Claude Code by following its
+[quickstart](https://code.claude.com/docs/en/quickstart), then run `claude` once and log in.
+`claude --version` must say 2.1.80 or newer.
+
+Claude Code channels are a research preview. On a claude.ai **Team or Enterprise** plan an
+Owner must turn them on first (Organization settings → Claude Code → Channels). Pro and Max
+plans need nothing.
+
+### 2. Get this repository onto that computer
+
+If it is not on that computer yet:
+
+```bash
+cd ~ && git clone https://github.com/kingbobbywhite-blip/blessedbets.git
+```
+
+If it is (you already run BlessedBets from it), update it instead:
+
+```bash
+cd ~/blessedbets && git pull origin main
+```
+
+These commands assume the folder is `~/blessedbets`, where `git clone` puts it. If yours is
+somewhere else, use that path in every command below.
+
+### 3. Install Switchboard
+
+```bash
+cd ~/blessedbets/switchboard && npm install && npm link
+```
+
+`npm link` makes the `switchboard` command work from any folder. Check everything is in place:
+
+```bash
 switchboard doctor
 ```
 
-Make the hub reachable from your phone over Tailscale with HTTPS (browsers only allow the
-microphone on https pages):
+### 4. Let your phone reach it from anywhere
 
-```bash
-tailscale serve --bg 7700
-```
+Switchboard only answers on your own computer. [Tailscale](https://tailscale.com) (free) is
+a private network between your own devices, so your phone reaches it on Wi-Fi or cellular
+without anything being opened to the internet.
 
-That prints an address like `https://your-mac.tail1234.ts.net`. Put it in `switchboard/.env`
-(copy `.env.example`):
+1. Install Tailscale on your phone (App Store or Play Store) and sign in.
+2. Install it on the computer and sign in with the **same account**.
+   - **Mac:** download it from [tailscale.com/download](https://tailscale.com/download). If
+     Terminal later says `command not found: tailscale`, turn on the command-line tool (CLI)
+     in the Tailscale app's settings.
+   - **Windows:** install it inside Ubuntu, where Switchboard runs:
 
-```bash
-SWITCHBOARD_PUBLIC_URL=https://your-mac.tail1234.ts.net
-```
+     ```bash
+     curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up
+     ```
 
-Start everything:
+3. Give Switchboard an https address on your Tailscale network (on Windows, put `sudo` in
+   front):
+
+   ```bash
+   tailscale serve --bg 7700
+   ```
+
+   If it asks you to enable HTTPS for your tailnet, open the link it shows, turn it on, and run
+   it again. It prints your address, something like `https://your-mac.tail1234.ts.net`.
+
+4. Tell Switchboard that address. Paste yours in place of the example:
+
+   ```bash
+   echo "SWITCHBOARD_PUBLIC_URL=https://your-mac.tail1234.ts.net" >> ~/blessedbets/switchboard/.env
+   ```
+
+### 5. Start it
 
 ```bash
 switchboard up
@@ -93,12 +188,28 @@ first time, Claude Code asks you to confirm "development channels" (custom chann
 on Anthropic's allowlist during the preview) and to trust the folder; the hub answers both
 for sessions it starts. Set `SWITCHBOARD_AUTO_ACCEPT_DIALOGS=0` to answer them yourself.
 
-Open the web UI with the link `switchboard up` prints (it carries your token once, then the
-browser remembers it), or scan the code from:
+It ends by printing a link. Open it in a browser on the computer to see Switchboard.
+
+To watch boss's own terminal, run `switchboard attach boss`; to leave it running, press
+Ctrl-b, then d.
+
+### 6. Open it on your phone
 
 ```bash
 switchboard pair
 ```
+
+prints two QR codes in the terminal. Point your phone's **camera** at the second one
+("Browser"): it opens Switchboard in the phone's browser, already signed in. Then Share →
+**Add to Home Screen** so it opens like an app. That is enough to chat, approve tool use, read
+the backlog and talk by voice with the screen on.
+
+The first QR code is for the Switchboard phone app ([below](#the-phone-app)), which is what
+keeps listening with the phone locked in your pocket.
+
+Postgres is built in: with no `DATABASE_URL`, the hub runs a real Postgres from the
+`embedded-postgres` package, keeping its data in `~/.switchboard/postgres`. To use your own,
+set `DATABASE_URL` in `switchboard/.env` (`docker compose up -d` in `switchboard/` starts one).
 
 ## Using it
 
@@ -132,9 +243,21 @@ They name themselves after their tmux session or folder (`SWITCHBOARD_SESSION=na
 
 ## The phone app
 
-`mobile/` is an Expo (React Native) app for iPhone and Android. Build and install it once;
-after that it keeps itself up to date. See [`mobile/README.md`](mobile/README.md) for building
-it with EAS or on your own machine. Pair it by scanning `switchboard pair`.
+`mobile/` is an Expo (React Native) app for iPhone and Android. You build and install it once,
+from the same terminal on the same computer; after that it keeps itself up to date.
+[`mobile/README.md`](mobile/README.md) walks through it. In short, for Android:
+
+```bash
+switchboard app setup
+```
+
+```bash
+cd ~/blessedbets/switchboard/mobile && npm install && npx eas-cli build --platform android --profile preview
+```
+
+The build runs on Expo's servers (free account) and ends with a link: open it on the phone to
+install. iPhone builds need a paid Apple Developer account, or a Mac with Xcode. Then open the
+app and scan the first code from `switchboard pair`.
 
 It has the same sessions, chat, terminal peek, backlog, search and approvals as the web UI,
 and three things a web page cannot do:
@@ -198,7 +321,8 @@ OpenAI-compatible server, including one running on your own machine.
 
 `switchboard up` survives closing the terminal (everything lives in tmux) but not a reboot.
 To start the hub at login, on macOS save this as
-`~/Library/LaunchAgents/dev.switchboard.hub.plist` (fix the two paths), then
+`~/Library/LaunchAgents/dev.switchboard.hub.plist` (put your Mac username in the path, and use
+the output of `which node` for the first one), then
 `launchctl load ~/Library/LaunchAgents/dev.switchboard.hub.plist`:
 
 ```xml
@@ -208,7 +332,7 @@ To start the hub at login, on macOS save this as
   <key>Label</key><string>dev.switchboard.hub</string>
   <key>ProgramArguments</key><array>
     <string>/opt/homebrew/bin/node</string>
-    <string>/Users/you/code/blessedbets/switchboard/src/hub/main.ts</string>
+    <string>/Users/YOUR-NAME/blessedbets/switchboard/src/hub/main.ts</string>
   </array>
   <key>EnvironmentVariables</key><dict>
     <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
@@ -220,12 +344,12 @@ To start the hub at login, on macOS save this as
 </dict></plist>
 ```
 
-On Linux, a systemd user unit (`~/.config/systemd/user/switchboard.service`, then
-`systemctl --user enable --now switchboard`):
+On Linux or WSL, a systemd user unit (`~/.config/systemd/user/switchboard.service`; replace
+`NODE` with the output of `which node`), then `systemctl --user enable --now switchboard`:
 
 ```ini
 [Service]
-ExecStart=/usr/bin/node %h/code/blessedbets/switchboard/src/hub/main.ts
+ExecStart=NODE %h/blessedbets/switchboard/src/hub/main.ts
 Restart=always
 [Install]
 WantedBy=default.target

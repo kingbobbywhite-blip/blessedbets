@@ -8,15 +8,20 @@ You build and install it **once**. After that, `switchboard app publish` (which 
 orchestrator runs itself when you ask it to change the app) updates every paired phone over
 the air.
 
-## 1. Set the hub address
+Everything here runs in the same terminal, on the same computer, as the rest of Switchboard
+(see "Start here" in the main README). Finish steps 1 to 5 there first.
 
-The app downloads its updates from the hub address it was built with. Edit the
-`SWITCHBOARD_PUBLIC_URL` lines in `eas.json` (for EAS builds), or export it before a local
-build:
+## 1. Point the build at your hub
+
+The app downloads its updates from the hub address it was built with:
 
 ```bash
-export SWITCHBOARD_PUBLIC_URL=https://your-mac.tail1234.ts.net
+switchboard app setup
 ```
+
+copies `SWITCHBOARD_PUBLIC_URL` from `switchboard/.env` into `eas.json`, which is what Expo's
+build servers read. For a build on your own machine, `export SWITCHBOARD_PUBLIC_URL=...` does
+the same.
 
 Optionally choose your own app identifiers with `SWITCHBOARD_IOS_BUNDLE_ID` and
 `SWITCHBOARD_ANDROID_PACKAGE` (default `dev.switchboard.app`).
@@ -24,30 +29,35 @@ Optionally choose your own app identifiers with `SWITCHBOARD_IOS_BUNDLE_ID` and
 ## 2. Build it
 
 ```bash
-cd switchboard/mobile
-npm install
+cd ~/blessedbets/switchboard/mobile && npm install
 ```
 
-**Android, easiest:** a cloud build with EAS gives you an `.apk` link to open on the phone.
+**Android, easiest:** a cloud build on Expo's servers (make a free account at
+[expo.dev](https://expo.dev) when it asks) ends with a link; open it on the phone and install
+the `.apk`.
 
 ```bash
-npm install -g eas-cli
-eas login
-eas build --platform android --profile preview
+npx eas-cli build --platform android --profile preview
 ```
 
 **iPhone with EAS** needs a paid Apple Developer account. Register the phone, then build:
 
 ```bash
-eas device:create
-eas build --platform ios --profile preview
+npx eas-cli device:create
 ```
 
-**On your own machine** (Xcode for iPhone, which works with a free Apple ID for 7-day installs;
-Android Studio for Android), with the phone plugged in:
+```bash
+npx eas-cli build --platform ios --profile preview
+```
+
+**On your own machine** (Xcode on a Mac for iPhone, which works with a free Apple ID for
+7-day installs; Android Studio for Android), with the phone plugged in:
 
 ```bash
 npx expo run:ios --device --configuration Release
+```
+
+```bash
 npx expo run:android --variant release
 ```
 
@@ -56,7 +66,8 @@ recognition), so it needs its own build.
 
 ## 3. Pair
 
-Open the app and scan the code from `switchboard pair` (or the web UI's Settings). It checks
+Open the app and scan the first code from `switchboard pair` (or the one in the web UI's
+Settings) with its **Scan pairing code** button. It checks
 the hub answers before saving the address and token (in the phone's secure storage).
 
 ## Walk mode
@@ -92,10 +103,17 @@ Without them, the app still notifies you while it is running (walk mode keeps it
 To be notified when it is closed, give the build an EAS project and push credentials:
 
 ```bash
-eas init                     # prints the project id
-export EAS_PROJECT_ID=...    # or add it to the env of each eas.json profile
-eas credentials              # Android: upload an FCM key; iOS: EAS creates the APNs key
+npx eas-cli init
 ```
+
+prints the project id. Add it as `EAS_PROJECT_ID` to the `env` of each profile in `eas.json`
+(next to `SWITCHBOARD_PUBLIC_URL`), then set up the push keys:
+
+```bash
+npx eas-cli credentials
+```
+
+(Android: upload a Firebase Cloud Messaging key; iPhone: EAS creates the push key for you.)
 
 then rebuild. The app registers its push token with the hub, and the hub sends a push when a
 session writes to you and the phone is not connected. Notifications have **Reply** (type an
