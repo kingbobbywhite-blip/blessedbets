@@ -9,12 +9,18 @@ import { copy, clock, timeAgo } from '../lib/ui.js'
 export function Settings() {
   const { state, actions } = useStore()
   const [pair, setPair] = useState(null)
+  const [code, setCode] = useState(null)
+  const newCode = () =>
+    api('POST', '/api/pair/codes', {})
+      .then(setCode)
+      .catch(() => {})
   const [devices, setDevices] = useState([])
   const [updates, setUpdates] = useState([])
   const [perms, setPerms] = useState(allowed())
   const [voiceList, setVoiceList] = useState(voices())
   useEffect(() => {
     api('GET', '/api/pair').then(setPair).catch(() => {})
+    newCode()
     api('GET', '/api/devices').then(setDevices).catch(() => {})
     api('GET', '/api/app/updates').then(setUpdates).catch(() => {})
     const t = setTimeout(() => setVoiceList(voices()), 500)
@@ -57,15 +63,15 @@ export function Settings() {
     </div>
 
     <div class="panel">
-      <h2>Phone app</h2>
-      <p>Install the Switchboard app (see <code>switchboard/mobile/README.md</code>), then scan this code from its pairing screen.</p>
-      ${pair ? html`<div class="qr" dangerouslySetInnerHTML=${{ __html: pair.app_qr_svg }}></div>` : html`<p class="muted">Loading…</p>`}
-      <p class="muted small">Hub address: ${pair?.base_url}. ${state.info?.public_url ? '' : 'Set SWITCHBOARD_PUBLIC_URL so phones off your Wi-Fi can reach it (Tailscale works well).'}</p>
-      <details>
-        <summary>Open this web page on another device instead</summary>
-        ${pair && html`<div class="qr" dangerouslySetInnerHTML=${{ __html: pair.web_qr_svg }}></div>`}
-        <p class="muted small">Add it to your home screen for an app-like window. The code carries your token: do not share it.</p>
-      </details>
+      <h2>Pair a phone</h2>
+      <p>Point the phone's camera at this code and tap the link it shows. Switchboard opens in the phone's browser, signed in; then use Share → <strong>Add to Home Screen</strong>. The Switchboard app's <strong>Scan pairing code</strong> button reads the same code.</p>
+      ${code ? html`<div class="qr" dangerouslySetInnerHTML=${{ __html: code.qr_svg }}></div>` : html`<p class="muted">Loading…</p>`}
+      ${code && html`<p class="small">Or type this into the phone's browser: <code>${code.url}</code> ${copyBtn(code.url)}</p>`}
+      <p class="muted small">
+        ${code ? `Works until ${clock(code.expires_at)}. ` : ''}The phone needs the Tailscale app switched on.
+        <button class="link-btn" onClick=${newCode}>New code</button>
+      </p>
+      ${!state.info?.public_url && html`<p class="muted small">No phone address is set, so this code only works on this computer. Run <code>switchboard tailscale</code>, then restart the hub.</p>`}
       <h3>Paired devices</h3>
       <ul class="plain">
         ${devices.map(d => html`<li>${d.online ? '🟢' : '⚪'} ${d.name} <span class="muted small">${d.platform}${d.app_version ? ` ${d.app_version}` : ''} · seen ${timeAgo(d.last_seen_at)} · push ${d.push_token ? 'on' : 'off'}</span></li>`)}

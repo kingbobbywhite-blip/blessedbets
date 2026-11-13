@@ -279,6 +279,33 @@ describe('phone app updates', () => {
   })
 })
 
+describe('pairing a phone', () => {
+  it('gives out a short link that opens Switchboard signed in, typed or scanned, and tells the app the token', async () => {
+    assert.equal((await t.api('POST', '/api/pair/codes', {}, 'wrong')).status, 401, 'only a paired device can make a link')
+    const { data } = await t.api('POST', '/api/pair/codes', {})
+    assert.match(data.code, /^[A-HJKMNP-Z2-9]{8}$/, 'no letters or digits that look alike')
+    assert.equal(data.url, `${t.base}/p/${data.code}`)
+    assert.equal(data.qr_text, data.url.toUpperCase())
+    assert.match(data.qr_svg, /<svg/)
+    assert.ok(new Date(data.expires_at).getTime() - Date.now() > 14 * 60_000)
+
+    for (const path of [`/p/${data.code}`, `/P/${data.code}`, `/p/${data.code.toLowerCase()}`]) {
+      const res = await fetch(`${t.base}${path}`, { redirect: 'manual' })
+      assert.equal(res.status, 302, path)
+      assert.equal(res.headers.get('location'), `/#token=${t.cfg.token}`)
+    }
+    const forApp = await fetch(data.url, { headers: { accept: 'application/json' } })
+    assert.deepEqual(await forApp.json(), { url: t.base, token: t.cfg.token })
+
+    const wrong = await fetch(`${t.base}/p/ZZZZZZZZ`, { redirect: 'manual' })
+    assert.equal(wrong.status, 410)
+    assert.match(await wrong.text(), /expired/)
+    const info = (await t.api('GET', '/api/pair')).data
+    assert.ok(info.flic.toggle.includes('/api/ptt/toggle'))
+    assert.equal(JSON.stringify(info).includes('qr'), false, 'the long-lived token is no longer put in a QR code')
+  })
+})
+
 describe('the home-screen icon', () => {
   it('hands a paired page a start address that carries the pairing, and nobody else', async () => {
     const plain = await (await fetch(`${t.base}/manifest.webmanifest`)).json()

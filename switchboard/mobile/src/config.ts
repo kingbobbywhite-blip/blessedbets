@@ -78,6 +78,32 @@ export function parsePairing(text: string): Pairing | null {
   return null
 }
 
+/** The short link `switchboard pair` shows: https://hub/p/7KQ2M9XA (a QR code carries it in capitals). */
+export function parseShortLink(text: string): string | null {
+  const m = /^(https?):\/\/([^/\s?#]+)\/p\/([a-z0-9]{4,16})\/?$/i.exec(text.trim())
+  return m ? `${m[1].toLowerCase()}://${m[2].toLowerCase()}/p/${m[3].toUpperCase()}` : null
+}
+
+/**
+ * Turn whatever was scanned or pasted into a pairing. A short link is exchanged
+ * with the hub for its address and token; the longer forms carry both already.
+ */
+export async function resolvePairing(text: string): Promise<Pairing | null> {
+  const direct = parsePairing(text)
+  if (direct) return direct
+  const link = parseShortLink(text)
+  if (!link) return null
+  let res: Response
+  try {
+    res = await fetch(link, { headers: { accept: 'application/json' } })
+  } catch {
+    throw new Error(`Could not reach ${link.split('/')[2]}. Is Tailscale switched on on this phone?`)
+  }
+  const data = (await res.json().catch(() => null)) as { url?: string; token?: string; error?: string } | null
+  if (!res.ok || !data?.url || !data.token) throw new Error(data?.error || `The hub answered ${res.status}.`)
+  return { url: data.url, token: data.token }
+}
+
 export async function deviceId(): Promise<string> {
   let id = await SecureStore.getItemAsync(DEVICE_KEY)
   if (!id) {

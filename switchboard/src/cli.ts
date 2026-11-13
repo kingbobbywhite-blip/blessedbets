@@ -9,10 +9,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
-import QRCode from 'qrcode'
 import { isExampleUrl, loadConfig, PACKAGE_ROOT, setEnvVar, type Config } from './hub/config.ts'
 import { Tmux, shellQuote } from './hub/tmux.ts'
 import { formatCheck, probeTools, toolChecks } from './preflight.ts'
+import { pairingPage, terminalQrFor } from './qr.ts'
 import { updateIdFor, updatesRoot } from './hub/updates.ts'
 import type { Message, SearchHit, Session, Task } from './shared/protocol.ts'
 
@@ -24,7 +24,8 @@ Running it
   down                    Stop the hub (sessions keep running; --all stops them too)
   doctor                  Check tmux, claude, Node, the database, speech, the phone address
   tailscale               Give Switchboard a private https address on Tailscale and save it
-  pair                    QR codes for the phone app and for a browser
+  pair                    A code to scan with your phone, shown large in a browser window
+                          (--terminal draws it here instead, for a computer with no screen)
   flic                    The Flic button links (push to talk)
   install-mcp             Add the Switchboard channel to every Claude Code session you start by hand
 
@@ -348,16 +349,38 @@ switch (cmd) {
   }
 
   case 'pair': {
-    const p = await api('GET', '/api/pair')
+    const { values } = flags(rest, { window: { type: 'boolean' }, terminal: { type: 'boolean' } })
+    const p = await api<{ url: string; qr_text: string; expires_at: string }>('POST', '/api/pair/codes', {})
     if (!cfg.publicUrl || isExampleUrl(cfg.publicUrl)) {
-      console.log('Note: no Tailscale address is set yet, so these codes point at an address your phone cannot reach.')
+      console.log('Note: no Tailscale address is set yet, so this code points at an address your phone cannot reach.')
       console.log('Run "switchboard tailscale" first (then "switchboard down && switchboard up"), and pair again.\n')
     }
-    console.log('Phone app: open Switchboard and scan this\n')
-    console.log(await QRCode.toString(p.app_url, { type: 'terminal', small: true }))
-    console.log(`Browser (add to home screen): ${p.web_url}\n`)
-    console.log(await QRCode.toString(p.web_url, { type: 'terminal', small: true }))
-    console.log('Both codes carry your token: do not share them.')
+    const until = new Date(p.expires_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+
+    // A code drawn by a browser always scans; one drawn out of terminal characters depends on the
+    // font. So on a computer with a screen, show it in a browser window unless asked not to.
+    const hasScreen = !process.env.SSH_CONNECTION && (process.platform === 'darwin' || Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY))
+    let inWindow = false
+    if (values.window || (hasScreen && !values.terminal)) {
+      const file = path.join(cfg.dataDir, 'pair.html')
+      fs.writeFileSync(file, await pairingPage({ qrText: p.qr_text, url: p.url, expiresAt: p.expires_at }), { mode: 0o600 })
+      inWindow = spawnSync(process.platform === 'darwin' ? 'open' : 'xdg-open', [file], { stdio: 'ignore' }).status === 0
+      if (inWindow) {
+        console.log("A large code is now open in your browser. Point your phone's camera at it and tap the link it shows.")
+      } else if (values.window) {
+        console.log(`Could not open a browser window. Open this file in a browser and scan the code in it:\n  ${file}\n`)
+      }
+    }
+    if (!inWindow) {
+      const qr = terminalQrFor(p.qr_text, { rows: process.stdout.rows, columns: process.stdout.columns })
+      console.log("Point your phone's camera at this code, then tap the link it shows.")
+      if (!qr.fits) console.log('This window is too small to show the whole code. Make it bigger and run this again.')
+      else if (qr.compact && process.stdout.isTTY) console.log('(Will not scan? Make this window about 40 lines tall and run this again.)')
+      console.log(qr.lines.join('\n'))
+    }
+    // Nothing long below a terminal code: a wrapped line would push its top off the window.
+    console.log(`${inWindow ? '\nOr type this into the phone\'s browser' : 'Or type'}: ${p.url}`)
+    console.log(`Until ${until}. The phone needs the Tailscale app switched on.`)
     break
   }
 

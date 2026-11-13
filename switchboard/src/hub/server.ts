@@ -19,6 +19,11 @@ import { transcribe } from './voice.ts'
 
 export const VERSION = '0.1.0'
 
+/** Letters and digits that cannot be mistaken for each other, read aloud or typed. */
+const PAIR_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
+const PAIR_CODE_LENGTH = 8
+const PAIR_TTL_MS = 15 * 60_000
+
 type Req = FastifyRequest<{ Params: Record<string, string>; Querystring: Record<string, string | undefined>; Body: any }>
 
 export async function buildServer(hub: Hub, sessions: SessionManager, opts: { logger?: boolean } = {}): Promise<FastifyInstance> {
@@ -369,16 +374,24 @@ export async function buildServer(hub: Hub, sessions: SessionManager, opts: { lo
   })
 
   // --- pairing ---------------------------------------------------------------
+  // A pairing link is short enough to scan off a screen and to type: /p/7KQ2M9XA. It stands in
+  // for the token for a quarter of an hour, so the link itself is not worth keeping.
+  const pairCodes = new Map<string, number>()
+  let wrongCodes = { since: Date.now(), count: 0 }
+  const newPairCode = (): { code: string; expires: number } => {
+    const now = Date.now()
+    for (const [c, expires] of pairCodes) if (expires < now) pairCodes.delete(c)
+    let code = ''
+    for (let i = 0; i < PAIR_CODE_LENGTH; i++) code += PAIR_ALPHABET[crypto.randomInt(PAIR_ALPHABET.length)]
+    const expires = now + PAIR_TTL_MS
+    pairCodes.set(code, expires)
+    return { code, expires }
+  }
+
   app.get('/api/pair', async (req: Req) => {
     const base = cfg.publicUrl ?? baseUrl(req)
-    const url = `${base}/#token=${encodeURIComponent(cfg.token)}`
-    const app = `switchboard://pair?${new URLSearchParams({ url: base, token: cfg.token }).toString()}`
     return {
       base_url: base,
-      web_url: url,
-      app_url: app,
-      web_qr_svg: await QRCode.toString(url, { type: 'svg', margin: 1 }),
-      app_qr_svg: await QRCode.toString(app, { type: 'svg', margin: 1 }),
       flic: {
         toggle: `${base}/api/ptt/toggle?token=${encodeURIComponent(cfg.token)}`,
         start: `${base}/api/ptt/start?token=${encodeURIComponent(cfg.token)}`,
@@ -387,6 +400,47 @@ export async function buildServer(hub: Hub, sessions: SessionManager, opts: { lo
       },
     }
   })
+
+  app.post('/api/pair/codes', async (req: Req) => {
+    const base = cfg.publicUrl ?? baseUrl(req)
+    const { code, expires } = newPairCode()
+    const url = `${base}/p/${code}`
+    // In capitals a link needs a smaller, coarser QR code (web addresses ignore case up to the path,
+    // and /P/ is answered as well as /p/).
+    const qrText = url.toUpperCase()
+    return {
+      code,
+      url,
+      qr_text: qrText,
+      qr_svg: await QRCode.toString(qrText, { type: 'svg', margin: 2, errorCorrectionLevel: 'M' }),
+      expires_at: new Date(expires).toISOString(),
+      base_url: base,
+    }
+  })
+
+  const openPairLink = async (req: Req, reply: FastifyReply) => {
+    const wantsJson = String(req.headers.accept ?? '').includes('application/json')
+    reply.header('cache-control', 'no-store')
+    const now = Date.now()
+    if (now - wrongCodes.since > 60_000) wrongCodes = { since: now, count: 0 }
+    if (wrongCodes.count > 30) return reply.code(429).send({ error: 'Too many wrong pairing codes. Wait a minute.' })
+    const code = String(req.params.code ?? '').toUpperCase()
+    const expires = pairCodes.get(code)
+    if (!expires || expires < now) {
+      wrongCodes.count++
+      const message = 'This pairing link has expired. On the computer, run "switchboard pair" for a new one.'
+      if (wantsJson) return reply.code(410).send({ error: message })
+      return reply
+        .code(410)
+        .header('content-type', 'text/html; charset=utf-8')
+        .send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Switchboard</title><p style="font: 18px -apple-system, sans-serif; margin: 15vh 24px; text-align: center">${message}</p>`)
+    }
+    // The phone app asks for JSON; a browser is sent to the page with the token after the #, which never reaches a server log.
+    if (wantsJson) return { url: cfg.publicUrl ?? baseUrl(req), token: cfg.token }
+    return reply.redirect(`/#token=${encodeURIComponent(cfg.token)}`)
+  }
+  app.get('/p/:code', openPairLink)
+  app.get('/P/:code', openPairLink)
 
   // --- phone app updates -----------------------------------------------------
   app.get('/updates/manifest', async (req: Req, reply) => {

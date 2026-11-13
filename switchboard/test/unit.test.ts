@@ -4,7 +4,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { isExampleUrl, resolveBin, setEnvVar, splitArgs, tokenMatches } from '../src/hub/config.ts'
+import jsQRModule from 'jsqr'
 import { formatCheck, toolChecks, type ToolProbe } from '../src/preflight.ts'
+import { pairingPage, terminalQr, terminalQrFor } from '../src/qr.ts'
 import { detectDialog, isToolApproval, keysToChoose, parseOptions, screenStatus } from '../src/hub/dialogs.ts'
 import { channelWarning } from '../src/hub/sessions.ts'
 import { shellQuote } from '../src/hub/tmux.ts'
@@ -231,5 +233,85 @@ describe('what is missing on this computer', () => {
 
   it('on Linux, installs tmux with apt', () => {
     assert.deepEqual(fixes({ ...mac, platform: 'linux' }).tmux.fix, ['sudo apt update && sudo apt install -y tmux'])
+  })
+})
+
+describe('the pairing code in a terminal', () => {
+  const link = 'HTTPS://ROBERTS-MACBOOK-AIR.TAIL2F3BA6.TS.NET/P/7KQ2M9XA'
+  type Decoder = (data: Uint8ClampedArray, width: number, height: number) => { data: string } | null
+  const jsQR = ((jsQRModule as unknown as { default?: Decoder }).default ?? jsQRModule) as unknown as Decoder
+
+  /** Paint the terminal lines as a picture, the way a phone's camera sees the screen. */
+  function photograph(lines: string[], scale = 6): { data: Uint8ClampedArray; width: number; height: number } {
+    const cell = /\x1b\[(?:38;5;(\d+);)?48;5;(\d+)m([ ▀])/g
+    const rows: boolean[][] = []
+    for (const line of lines) {
+      const top: boolean[] = []
+      const bottom: boolean[] = []
+      for (const m of line.matchAll(cell)) {
+        const bg = m[2] === '16'
+        top.push(m[3] === '▀' ? m[1] === '16' : bg)
+        bottom.push(bg)
+      }
+      rows.push(top, bottom)
+    }
+    const width = rows[0].length * scale
+    const height = rows.length * scale
+    const data = new Uint8ClampedArray(width * height * 4)
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const v = rows[Math.floor(y / scale)][Math.floor(x / scale)] ? 0 : 255
+        data.set([v, v, v, 255], (y * width + x) * 4)
+      }
+    }
+    return { data, width, height }
+  }
+
+  it('reads back as the link, drawn either way', () => {
+    const small = photograph(terminalQr(link).lines)
+    assert.equal(jsQR(small.data, small.width, small.height)?.data, link)
+    // The full drawing: each square is two cells wide and one line tall, so photograph it at that shape.
+    const full = terminalQr(link, { compact: false })
+    const rows = full.lines.map(line => [...line.matchAll(/\x1b\[48;5;(\d+)m {2}/g)].map(m => m[1] === '16'))
+    const scale = 6
+    const width = rows[0].length * scale
+    const data = new Uint8ClampedArray(width * rows.length * scale * 4)
+    for (let y = 0; y < rows.length * scale; y++) {
+      for (let x = 0; x < width; x++) {
+        const v = rows[Math.floor(y / scale)][Math.floor(x / scale)] ? 0 : 255
+        data.set([v, v, v, 255], (y * width + x) * 4)
+      }
+    }
+    assert.equal(jsQR(data, width, rows.length * scale)?.data, link)
+    assert.ok(!full.lines.join('').includes('▀'), 'the full drawing uses no characters a font could distort')
+  })
+
+  it('picks the drawing that cannot be distorted whenever the window is big enough', () => {
+    assert.equal(terminalQrFor(link, { rows: 50, columns: 120 }).compact, false)
+    const standard = terminalQrFor(link, { rows: 24, columns: 80 })
+    assert.deepEqual([standard.compact, standard.fits], [true, true])
+    assert.equal(terminalQrFor(link, { rows: 12, columns: 80 }).fits, false)
+    assert.equal(terminalQrFor(link, {}).compact, true, 'not a terminal: the small one')
+  })
+
+  it('is coarse and small enough for a standard 80 by 24 window, with the lines printed around it', () => {
+    const qr = terminalQr(link)
+    assert.equal(qr.size, 29, 'a capitals-only link needs the smallest practical code')
+    assert.ok(qr.width <= 80)
+    assert.ok(qr.height + 5 <= 24)
+    for (const line of qr.lines) assert.equal(line.replace(/\x1b\[[0-9;]*m/g, '').length, qr.width, 'every line is the same width')
+    assert.ok(!qr.lines[0].includes('▀') && qr.lines[0].includes('48;5;231'), 'a white margin on top')
+  })
+
+  it('uses exact black and white, not the theme colours', () => {
+    const colours = new Set([...terminalQr(link).lines.join('').matchAll(/[34]8;5;(\d+)/g)].map(m => m[1]))
+    assert.deepEqual([...colours].sort(), ['16', '231'])
+  })
+
+  it('makes a page with the code, the link to type and when it stops working', async () => {
+    const page = await pairingPage({ qrText: link, url: link.toLowerCase(), expiresAt: '2026-01-01T12:00:00Z' })
+    assert.match(page, /<svg/)
+    assert.ok(page.includes(link.toLowerCase()))
+    assert.match(page, /Works until/)
   })
 })

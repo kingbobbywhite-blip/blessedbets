@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { Pressable, ScrollView, Text, TextInput, View } from 'react-native'
 import { CameraView, useCameraPermissions } from 'expo-camera'
-import { builtInHubUrl, parsePairing, savePairing, type Pairing } from '../config'
+import { builtInHubUrl, parsePairing, parseShortLink, resolvePairing, savePairing, type Pairing } from '../config'
 import { Button, useTheme } from '../ui'
 
 export function PairScreen({ onPaired }: { onPaired: (p: Pairing) => void }) {
@@ -29,11 +29,26 @@ export function PairScreen({ onPaired }: { onPaired: (p: Pairing) => void }) {
     }
   }
 
+  /** A scanned code or a pasted link: the short link from `switchboard pair`, or one carrying the token. */
+  const tryText = async (text: string) => {
+    setChecking(true)
+    setError(null)
+    try {
+      const p = await resolvePairing(text)
+      if (!p) return setError('That is not a Switchboard pairing code.')
+      await tryPair(p)
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setChecking(false)
+    }
+  }
+
   return (
     <ScrollView style={{ flex: 1, backgroundColor: t.bg }} contentContainerStyle={{ padding: 20, gap: 16, paddingTop: 70 }}>
       <Text style={{ color: t.text, fontSize: 28, fontWeight: '700' }}>Switchboard</Text>
       <Text style={{ color: t.muted, fontSize: 15 }}>
-        Pair this phone with your hub. On the computer running it, run <Text style={{ fontFamily: 'Menlo' }}>switchboard pair</Text>, or open the web UI's Settings, and scan the code.
+        Pair this phone with your hub. On the computer running it, run <Text style={{ fontFamily: 'Menlo' }}>switchboard pair --window</Text> and scan the code it shows.
       </Text>
       {scanning ? (
         <View style={{ height: 320, borderRadius: 16, overflow: 'hidden' }}>
@@ -41,10 +56,9 @@ export function PairScreen({ onPaired }: { onPaired: (p: Pairing) => void }) {
             style={{ flex: 1 }}
             barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
             onBarcodeScanned={({ data }) => {
-              const p = parsePairing(data)
-              if (p) {
+              if (parsePairing(data) || parseShortLink(data)) {
                 setScanning(false)
-                void tryPair(p)
+                void tryText(data)
               }
             }}
           />
@@ -70,7 +84,11 @@ export function PairScreen({ onPaired }: { onPaired: (p: Pairing) => void }) {
         autoCorrect={false}
         keyboardType="url"
         value={url}
-        onChangeText={setUrl}
+        onChangeText={text => {
+          setUrl(text)
+          // Pasting the short link from `switchboard pair` is enough on its own.
+          if (parseShortLink(text)) void tryText(text)
+        }}
         style={{ borderWidth: 1, borderColor: t.border, borderRadius: 10, padding: 11, color: t.text, backgroundColor: t.surface }}
       />
       <TextInput

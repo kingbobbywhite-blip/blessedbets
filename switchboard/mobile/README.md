@@ -66,8 +66,8 @@ recognition), so it needs its own build.
 
 ## 3. Pair
 
-Open the app and scan the first code from `switchboard pair` (or the one in the web UI's
-Settings) with its **Scan pairing code** button. It checks
+Open the app and scan the code from `switchboard pair` (or the one in the web UI's Settings)
+with its **Scan pairing code** button. It checks
 the hub answers before saving the address and token (in the phone's secure storage).
 
 ## Walk mode

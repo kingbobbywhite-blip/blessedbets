@@ -137,7 +137,7 @@ mark { background: color-mix(in srgb, var(--accent) 30%, transparent); color: in
 .btn.danger, .danger { color: var(--danger); }
 .btn.danger:hover { border-color: var(--danger); }
 .icon-btn { appearance: none; border: none; background: none; color: var(--text); font-size: 1.3rem; padding: 6px 10px; cursor: pointer; border-radius: 8px; }
-.link-btn { appearance: none; border: none; background: none; padding: 0 2px; cursor: pointer; font-size: 0.85rem; }
+.link-btn { appearance: none; border: none; background: none; padding: 0 2px; cursor: pointer; font-size: 0.85rem; color: var(--accent); }
 input, textarea, select {
   font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
   padding: 9px 11px; width: 100%; min-width: 0;
@@ -321,7 +321,7 @@ label.switch, .row-inline label, .filters label { flex-direction: row; align-ite
 .settings { display: flex; flex-direction: column; gap: 14px; max-width: 760px; }
 .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
 .panel p { margin: 0; }
-.qr { width: 220px; max-width: 70vw; background: #fff; padding: 8px; border-radius: 12px; }
+.qr { width: 280px; max-width: 80vw; background: #fff; padding: 8px; border-radius: 12px; }
 .qr svg { display: block; width: 100%; height: auto; }
 .urls dt { font-weight: 600; margin-top: 8px; }
 .urls dd { margin: 4px 0 0; display: flex; gap: 8px; align-items: center; }

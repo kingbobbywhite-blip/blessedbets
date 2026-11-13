@@ -203,16 +203,25 @@ Ctrl-b, then d.
 switchboard pair
 ```
 
-prints two QR codes in the terminal. Point your phone's **camera** at the second one
-("Browser"): it opens Switchboard in the phone's browser, already signed in. Then Share →
-**Add to Home Screen** so it opens like an app; the icon stays signed in. That is enough to
-chat, approve tool use, read the backlog and talk by voice with the screen on.
+opens a page in your browser with one large code. Point your phone's **camera** at it and tap
+the link that appears: Switchboard opens in the phone's browser, already signed in. Then
+Share → **Add to Home Screen** so it opens like an app; the icon stays signed in. That is
+enough to chat, approve tool use, read the backlog and talk by voice with the screen on.
 
-If the codes are hard to scan off the terminal, open the link `switchboard up` printed on the
-computer and go to **Settings**: the same two codes are there, larger.
+The short link under the code (`https://…/p/7KQ2M9XA`) does the same if you type it into the
+phone's browser. A code works for 15 minutes; run the command again for a new one. The same
+code is in the web UI under **Settings → Pair a phone**.
 
-The first QR code is for the Switchboard phone app ([below](#the-phone-app)), which is what
-keeps listening with the phone locked in your pocket.
+The phone needs the Tailscale app installed, logged in to the same account and switched on,
+or the link will not load.
+
+On a computer with no screen (over ssh), `switchboard pair --terminal` draws the code in the
+terminal instead. Make the window about 40 lines tall first: then every square is painted as
+plain background, which any camera reads. In a smaller window it has to use half-height
+characters, which some terminal fonts draw unevenly, and those codes often will not scan.
+
+The Switchboard phone app ([below](#the-phone-app)) pairs from the same code, and is what keeps
+listening with the phone locked in your pocket.
 
 Postgres is built in: with no `DATABASE_URL`, the hub runs a real Postgres from the
 `embedded-postgres` package, keeping its data in `~/.switchboard/postgres`. To use your own,
@@ -266,7 +275,7 @@ cd ~/blessedbets/switchboard/mobile && npm install && npx eas-cli build --platfo
 
 The build runs on Expo's servers (free account) and ends with a link: open it on the phone to
 install. iPhone builds need a paid Apple Developer account, or a Mac with Xcode. Then open the
-app and scan the first code from `switchboard pair`.
+app and scan the code from `switchboard pair`.
 
 It has the same sessions, chat, terminal peek, backlog, search and approvals as the web UI,
 and three things a web page cannot do:
@@ -399,8 +408,8 @@ the session's own transcript, so Claude really has it).
 
 - Everything except the static web page, the health check and the app-update files needs the
   token (`~/.switchboard/token`, created on first run, readable only by you). Phones and
-  browsers get it from the pairing code. `switchboard pair` codes carry it: keep them to
-  yourself.
+  browsers get it by pairing. A pairing code stands in for the token for 15 minutes, and only
+  works from a device that can reach the hub (your tailnet); keep it to yourself for that long.
 - The hub listens on 127.0.0.1 by default. Reach it through `tailscale serve`, which adds HTTPS
   and keeps it inside your tailnet. `SWITCHBOARD_HOST=0.0.0.0` exposes it on your network.
 - A channel is a way to put text in front of Claude. Only holders of the token can send
