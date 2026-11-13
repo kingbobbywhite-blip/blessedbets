@@ -70,6 +70,7 @@ function slugify(s: string): string {
 const instructions = [
   `You are connected to Switchboard as the Claude Code session "${SESSION}" (${ROLE}).`,
   `Messages arrive as <channel source="switchboard" from="..." message_id="..." kind="..." via="...">text</channel>.`,
+  `Where channels are not available they are typed in instead, as a line starting [switchboard from="..." via="..." id="..."]. Treat that exactly like a channel message from that sender.`,
   `- from="user" is your human. They are often away from the terminal (walking, on their phone) and cannot see your terminal output: always answer them with the reply tool. Text you only write in the terminal never reaches them.`,
   `- via="voice" means they spoke it and will hear your reply read aloud: answer in a few plain spoken sentences, with no markdown, tables, code blocks, file paths or long lists; offer details if they want them.`,
   `- from="<session name>" is another Claude Code session. Answer it with send_message(to="<that name>"), not reply.`,

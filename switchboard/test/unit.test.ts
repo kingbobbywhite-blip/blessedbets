@@ -7,8 +7,8 @@ import { codeStamp, findClaude, isExampleUrl, resolveBin, setEnvVar, splitArgs, 
 import jsQRModule from 'jsqr'
 import { formatCheck, toolChecks, type ToolProbe } from '../src/preflight.ts'
 import { pairingPage, terminalQr, terminalQrFor } from '../src/qr.ts'
-import { detectDialog, isToolApproval, keysToChoose, parseOptions, screenStatus } from '../src/hub/dialogs.ts'
-import { channelWarning } from '../src/hub/sessions.ts'
+import { detectDialog, isToolApproval, keysToChoose, movesTo, parseOptions, screenStatus } from '../src/hub/dialogs.ts'
+import { channelProblem, typedForm } from '../src/hub/sessions.ts'
 import { shellQuote } from '../src/hub/tmux.ts'
 import { parseTranscriptLines } from '../src/hub/transcripts.ts'
 import { multipart, updateIdFor } from '../src/hub/updates.ts'
@@ -84,9 +84,59 @@ describe('startup dialogs', () => {
     assert.equal(detectDialog('Plan:\n1. Fix the bug\n3. Ship it\n> ', { autoAccept: true }), null)
   })
 
-  it('notices when Claude Code refuses to register the channel', () => {
-    assert.match(channelWarning('Channels blocked by org policy: ask an admin')!, /Owner can enable/)
-    assert.equal(channelWarning('Channels (experimental) messages from server:switchboard inject directly in this session'), null)
+  // The layout and wording below are the real program's (read out of Claude Code 2.1.322).
+  const TRUST = [
+    ' Accessing workspace:',
+    '',
+    ' /Users/me/blessedbets/switchboard/orchestrator',
+    '',
+    ' Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open source',
+    " project, or work from your team). If not, take a moment to review what's in this folder first.",
+    '',
+    " Claude Code'll be able to read, edit, and execute files here.",
+    '',
+    ' Security guide',
+    '',
+    ' ❯ No, exit',
+    '   Yes, I trust this folder',
+    '',
+    ' Enter to confirm · Esc to cancel',
+  ].join('\n')
+
+  it('answers the real trust question: no numbers, and the highlight starts on "No, exit"', () => {
+    const d = detectDialog(TRUST, { autoAccept: true })!
+    assert.equal(d.kind, 'trust_folder')
+    assert.deepEqual(d.options.map(o => [o.label, o.focused]), [['No, exit', true], ['Yes, I trust this folder', false]])
+    assert.equal(d.answer?.label, 'Yes, I trust this folder')
+    assert.deepEqual(movesTo(d.options, d.answer!), ['Down'], 'the highlight has to be moved first')
+    // Once the pointer is seen on the right row there is nothing left to move, and only then is Enter pressed.
+    const moved = detectDialog(TRUST.replace(' ❯ No, exit', '   No, exit').replace('   Yes, I trust', ' ❯ Yes, I trust'), { autoAccept: true })!
+    assert.deepEqual(movesTo(moved.options, moved.answer!), [])
+    assert.equal(detectDialog(TRUST, { autoAccept: false })!.answer, null)
+  })
+
+  it('reads a menu whose labels wrap onto a second line', () => {
+    const screen = ['Do you want to proceed?', '❯ 1. Yes', "  2. Yes, and don't ask again for npm run commands in", '     /Users/me/code/some/long/path', '  3. No, and tell Claude what to do differently (esc)'].join('\n')
+    assert.deepEqual(parseOptions(screen).map(o => o.number), [1, 2, 3])
+    assert.ok(isToolApproval(screen))
+  })
+
+  it('does not mistake the input prompt or quoted text for a menu', () => {
+    assert.deepEqual(parseOptions('────────\n❯ fix the failing test\n────────\n  ? for shortcuts'), [])
+    assert.deepEqual(parseOptions('> quoted line one\n  continued here\n  and here'), [])
+    assert.equal(detectDialog('✻ Welcome\n\n❯ \n  ? for shortcuts', { autoAccept: true }), null)
+  })
+
+  it('notices when Claude Code says it will not take channel messages', () => {
+    assert.match(channelProblem('Channels blocked by org policy (managed) · Inbound messages will be silently dropped')!, /organization/)
+    assert.match(channelProblem('Channels are not currently available')!, /not available on this account/)
+    assert.match(channelProblem('server:switchboard · no MCP server configured with that name')!, /did not accept/)
+    assert.equal(channelProblem('Channels (experimental) messages from server:switchboard inject directly in this session · restart without --dangerously-load-development-channels to stop'), null)
+  })
+
+  it('marks a message typed into a terminal so the session knows who sent it', () => {
+    assert.equal(typedForm({ id: 12, from_id: 'user', body: 'run the tests\nthen tell me', kind: 'voice', meta: { via: 'voice' } }), '[switchboard from="user" via="voice" id="12"] run the tests then tell me')
+    assert.equal(typedForm({ id: 3, from_id: 'boss', body: 'status?', kind: 'chat' }), '[switchboard from="boss" id="3"] status?')
   })
 
   it('reads busy, waiting and idle off the screen', () => {
@@ -138,6 +188,13 @@ describe('transcripts', () => {
       ['a1', 'assistant', 'Sure.'],
     ])
     assert.deepEqual(r.seenMessageIds, [42])
+  })
+
+  it('recognises a message that was typed in rather than pushed', () => {
+    const line = JSON.stringify({ type: 'user', uuid: 'u9', sessionId: 's', message: { role: 'user', content: '[switchboard from="user" via="voice" id="77"] what is next' } })
+    const r = parseTranscriptLines(line)
+    assert.deepEqual(r.seenMessageIds, [77])
+    assert.deepEqual(r.entries, [], 'not stored twice')
   })
 })
 

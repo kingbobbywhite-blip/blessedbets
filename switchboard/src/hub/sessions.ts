@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { Session, SessionRole } from '../shared/protocol.ts'
 import { SYSTEM, USER, isValidName } from '../shared/protocol.ts'
-import { detectDialog, isToolApproval, keysToChoose, screenStatus } from './dialogs.ts'
+import { detectDialog, isToolApproval, movesTo, screenStatus } from './dialogs.ts'
 import type { Hub } from './hub.ts'
 import * as store from './store.ts'
 import { BadRequest, Forbidden, NotFound } from './store.ts'
@@ -138,7 +138,8 @@ export class SessionManager {
       identityPrompt(s.name, s.role, this.cfg.orchestrator),
     ]
     if (s.model) args.push('--model', s.model)
-    if (s.permission_mode) args.push('--permission-mode', s.permission_mode)
+    // "default" is what you get with no flag; Claude Code does not take it as a value.
+    if (s.permission_mode && s.permission_mode !== 'default') args.push('--permission-mode', s.permission_mode)
     if (s.resume) args.push('--resume', s.resume)
     args.push(...this.cfg.claudeArgs, ...(s.extra_args ?? []))
     return args
@@ -268,8 +269,18 @@ export class SessionManager {
       if (dialog) {
         quietSince = 0
         if (dialog.answer) {
-          await this.tmux.keys(tmuxName, keysToChoose(dialog.options, dialog.answer))
-          answered.push(`${dialog.kind}: "${dialog.answer.label}"`)
+          // Move the highlight, look again, and press Enter only once the pointer is seen on the
+          // right choice: these dialogs ignore keys for a moment after they open, some take no
+          // number keys, and the one that asks about trusting a folder starts on "No, exit".
+          const moves = movesTo(dialog.options, dialog.answer)
+          if (moves.length) {
+            await this.tmux.keys(tmuxName, moves)
+            await sleep(350)
+            continue
+          }
+          await this.tmux.keys(tmuxName, ['Enter'])
+          const entry = `${dialog.kind}: "${dialog.answer.label}"`
+          if (answered.at(-1) !== entry) answered.push(entry)
           await sleep(900)
           continue
         }
@@ -290,17 +301,25 @@ export class SessionManager {
         if (!quietSince) quietSince = Date.now()
         if (Date.now() - quietSince >= (promptVisible ? 1200 : 3000)) {
           this.hub.ready.add(name)
-          const warning = channelWarning(screen)
-          await store.updateSession(this.hub.db, name, { status: 'idle', status_text: warning ?? '' })
+          // Claude Code says on screen when it will not take channel messages (the feature is a
+          // preview, and an organization can switch it off). The session still works: its tools are
+          // connected, and messages are typed into its terminal instead of pushed.
+          const problem = channelProblem(screen)
+          await store.updateSession(this.hub.db, name, {
+            status: 'idle',
+            status_text: problem ? 'No channels here: messages are typed into its terminal' : '',
+            delivery: problem ? 'keys' : 'channel',
+          })
           const session = (await this.hub.publishSession(name))!
           await this.hub.deliver(name)
-          if (warning) {
-            await this.hub.send({ from_id: SYSTEM, to_id: USER, kind: 'notification', body: `${name}: ${warning}`, meta: { session: name } })
+          const fallback = problem ? ` ${problem} Messages will be typed into its terminal instead; replies come back the same way.` : ''
+          if (problem) {
+            await this.hub.send({ from_id: SYSTEM, to_id: USER, kind: 'notification', body: `${name}:${fallback}`, meta: { session: name } })
           }
           return {
             session,
             ready: true,
-            note: `${answered.length ? `Ready. Answered: ${answered.join('; ')}.` : 'Ready.'}${warning ? ` Warning: ${warning}` : ''}`,
+            note: `${answered.length ? `Ready. Answered: ${answered.join('; ')}.` : 'Ready.'}${fallback}`,
           }
         }
       } else {
@@ -403,11 +422,17 @@ export class SessionManager {
   }
 
   /** For sessions without a channel: type each queued message into the terminal. */
+  /**
+   * For sessions without a working channel: type each queued message into the terminal, marked so
+   * the session can tell who it is from. Nothing is typed while a question is on its screen, where
+   * a stray "1" or Enter would answer it; the message waits and the next look at the screen retries.
+   */
   private async deliverByKeys(s: Session): Promise<void> {
-    if (!s.tmux_session || !(await this.tmux.has(s.tmux_session))) return
+    if (!s.tmux_session || !(await this.tmux.has(s.tmux_session)) || (await this.tmux.paneDead(s.tmux_session))) return
     for (const m of await store.undeliveredFor(this.hub.db, s.name)) {
-      const from = m.from_id === USER ? '' : `[from ${m.from_id}] `
-      await this.tmux.submit(s.tmux_session, `${from}${m.body}`.replace(/\n+/g, ' '))
+      const screen = await this.tmux.capture(s.tmux_session).catch(() => '')
+      if (isToolApproval(screen) || detectDialog(screen, { autoAccept: false })) return
+      await this.tmux.submit(s.tmux_session, typedForm(m))
       await this.hub.onAck(s.name, m.id)
       await sleep(400)
     }
@@ -451,6 +476,8 @@ export class SessionManager {
           continue
         }
         const screen = await this.tmux.capture(s.tmux_session).catch(() => '')
+        // Messages typed into a terminal wait while a question is on its screen; try again now.
+        if (s.delivery === 'keys' && this.hub.ready.has(s.name)) await this.hub.deliver(s.name)
         if (s.status === 'attention' || s.status === 'starting') {
           // Someone answered the startup question (from the web UI's Screen, or attached),
           // or the hub restarted while this session was starting.
@@ -496,15 +523,28 @@ export class SessionManager {
   }
 }
 
-/** Claude Code says on screen when it will not register the channel. */
-export function channelWarning(screen: string): string | null {
-  if (/blocked by org(anization)? policy|channelsEnabled|admin (needs|must) enable/i.test(screen)) {
-    return 'Channels are blocked by your organization. An Owner can enable them under Organization settings > Claude Code > Channels.'
+/**
+ * Why Claude Code will not push channel messages into this session, read off its startup screen
+ * (the wording is Claude Code's own), or null when nothing there says so.
+ */
+export function channelProblem(screen: string): string | null {
+  if (/blocked by org(anization)? policy|channelsEnabled|silently dropped/i.test(screen)) {
+    return 'Channels are switched off for your organization (an Owner can turn them on under Organization settings > Claude Code > Channels).'
   }
-  if (/not on the (approved )?allowlist/i.test(screen) && !/Channels \(experimental\)/i.test(screen)) {
-    return 'Claude Code did not register the Switchboard channel (allowlist). Messages will not arrive until it does.'
+  if (/Channels are not (currently )?available/i.test(screen)) {
+    return 'Claude Code channels are not available on this account yet (they are a preview that is rolling out gradually).'
   }
+  if (/no MCP server configured with that name|not on the approved channels allowlist|not on your org.s approved channels list|entries need --dangerously-load-development-channels/i.test(screen)) {
+    return 'Claude Code did not accept Switchboard as a channel in this session.'
+  }
+  if (/messages are dropped/i.test(screen)) return 'Claude Code is not taking channel messages in this session.'
   return null
+}
+
+/** A message as typed into a session's terminal: `[switchboard from="user" via="voice" id="12"] text`. */
+export function typedForm(m: { id: number; from_id: string; body: string; kind: string; meta?: Record<string, unknown> }): string {
+  const via = typeof m.meta?.via === 'string' && /^[a-z0-9_-]+$/i.test(m.meta.via) ? m.meta.via : m.kind === 'voice' ? 'voice' : ''
+  return `[switchboard from="${m.from_id}"${via ? ` via="${via}"` : ''} id="${m.id}"] ${m.body.replace(/\s*\n+\s*/g, ' ')}`
 }
 
 function q(s: string): string {
@@ -515,7 +555,8 @@ export function identityPrompt(name: string, role: SessionRole, orchestrator: st
   const common =
     `You are the Claude Code session named "${name}", connected to Switchboard. ` +
     `Your human reaches you through the switchboard channel, often by voice from their phone while away from the desk, ` +
-    `and other sessions can message you the same way. Messages arrive as <channel source="switchboard" from="..." message_id="...">. ` +
+    `and other sessions can message you the same way. Messages arrive as <channel source="switchboard" from="..." message_id="...">, ` +
+    `or typed in as a line starting [switchboard from="..." id="..."]; treat both the same. ` +
     `Answer the human with the switchboard reply tool (not plain text, which they cannot see when away), and other sessions with send_message. ` +
     `Keep the shared backlog current with the task tools, and use search_history when you need context you no longer have.`
   if (role === 'orchestrator') {

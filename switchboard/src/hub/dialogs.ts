@@ -20,12 +20,56 @@ export interface Dialog {
   answer: DialogOption | null
 }
 
-const OPTION_RE = /^[\s│|]*(?:(❯|›|>)\s*)?(\d{1,2})[.)]\s+(.+?)\s*[│|]?\s*$/
+const NUMBERED_RE = /^[\s│|]*(?:(❯|›|>)\s*)?(\d{1,2})[.)]\s+(.+?)\s*[│|]?\s*$/
+const POINTER_RE = /^(\s*)([❯›>])(\s+)(\S.*?)\s*$/
+const NUMBER_PREFIX_RE = /^\d{1,2}[.)]\s+/
 
+/** A dialog is sometimes drawn inside a box: drop its side borders but keep every column where it was. */
+function stripFrame(line: string): string {
+  return line.replace(/^(\s*)[│|](?=\s|$)/, '$1 ').replace(/\s*[│|]\s*$/, '')
+}
+
+/**
+ * The choices of the menu at the bottom of the screen, in order, and which one
+ * is highlighted. Claude Code draws a menu as rows of text with a pointer (❯)
+ * in front of the highlighted one; some are numbered ("❯ 1. Yes") and some are
+ * not ("❯ No, exit" above "  Yes, I trust this folder"), and in those the
+ * number keys do nothing, so the highlight has to be moved with the arrow keys.
+ */
 export function parseOptions(screen: string): DialogOption[] {
+  const lines = screen.split('\n').map(stripFrame)
+  for (let p = lines.length - 1; p >= 0; p--) {
+    const m = POINTER_RE.exec(lines[p])
+    if (!m) continue
+    // ">" alone also starts a quoted line or an old-style prompt; only trust it in front of a number.
+    if (m[2] === '>' && !NUMBER_PREFIX_RE.test(m[4])) continue
+    const col = m[1].length + m[2].length + m[3].length
+    // Rows of the same menu start in the same column. A row whose text starts further right is a
+    // wrapped label or a description under a choice; anything else ends the menu.
+    const kind = (line: string): 'option' | 'continuation' | 'end' => {
+      if (!line.trim()) return 'end'
+      const indent = line.length - line.trimStart().length
+      return indent === col ? 'option' : indent > col ? 'continuation' : 'end'
+    }
+    const rows: { label: string; focused: boolean }[] = [{ label: m[4], focused: true }]
+    for (let i = p - 1; i >= 0; i--) {
+      const k = kind(lines[i])
+      if (k === 'end') break
+      if (k === 'option') rows.unshift({ label: lines[i].trim(), focused: false })
+    }
+    for (let i = p + 1; i < lines.length; i++) {
+      const k = kind(lines[i])
+      if (k === 'end') break
+      if (k === 'option') rows.push({ label: lines[i].trim(), focused: false })
+    }
+    // One row with a pointer is the input prompt, not a menu, and it is the newest thing on screen.
+    if (rows.length < 2) return []
+    return rows.map((r, i) => ({ number: i + 1, label: r.label.replace(NUMBER_PREFIX_RE, ''), focused: r.focused }))
+  }
+  // No pointer anywhere (a terminal that cannot draw it): fall back to a run of numbered rows.
   const options: DialogOption[] = []
-  for (const line of screen.split('\n')) {
-    const m = OPTION_RE.exec(line)
+  for (const line of lines) {
+    const m = NUMBERED_RE.exec(line)
     if (!m) continue
     const number = Number(m[2])
     // Options are numbered from 1 in order; anything else is a numbered list in the conversation.
@@ -42,13 +86,13 @@ export function detectDialog(screen: string, opts: { autoAccept: boolean }): Dia
   // Only the bottom of the screen matters: older dialogs scroll up and stay in the capture.
   const tail = screen.split('\n').slice(-45).join('\n')
   const options = parseOptions(tail)
-  if (options.length < 2) return unnumberedDevChannels(tail, opts.autoAccept)
+  if (options.length < 2) return null
   const pick = (re: RegExp) => (opts.autoAccept ? (options.find(o => re.test(o.label)) ?? null) : null)
 
   if (/development channels?|local development/i.test(tail) && options.some(o => /local development/i.test(o.label))) {
     return { kind: 'dev_channels', options, answer: pick(/local development/i) }
   }
-  if (/trust (the files in )?this folder|do you trust|project you created or one you trust|safety check/i.test(tail)) {
+  if (/trust (the files in )?this folder|do you trust|project you created or one you trust|safety check|accessing workspace/i.test(tail)) {
     return { kind: 'trust_folder', options, answer: pick(/^yes\b/i) }
   }
   if (/bypass permissions mode/i.test(tail) && options.some(o => /yes, i accept/i.test(o.label))) {
@@ -60,21 +104,6 @@ export function detectDialog(screen: string, opts: { autoAccept: boolean }): Dia
     return { kind: 'mcp_consent', options, answer: null }
   }
   return { kind: 'unknown_select', options, answer: null }
-}
-
-/** The development-channels warning, in case a version draws its two choices without numbers. */
-function unnumberedDevChannels(tail: string, autoAccept: boolean): Dialog | null {
-  if (!/development channels?/i.test(tail)) return null
-  const lines = tail.split('\n')
-  const dev = lines.find(l => /I am using this for local development/i.test(l))
-  const exit = lines.find(l => /^[\s│|❯›>]*Exit\s*[│|]?\s*$/.test(l))
-  if (!dev || !exit) return null
-  const exitFocused = /[❯›>]/.test(exit) && !/[❯›>]/.test(dev)
-  const options: DialogOption[] = [
-    { number: 1, label: 'I am using this for local development', focused: !exitFocused },
-    { number: 2, label: 'Exit', focused: exitFocused },
-  ]
-  return { kind: 'dev_channels', options, answer: autoAccept ? options[0] : null }
 }
 
 /**
@@ -91,16 +120,20 @@ export function isToolApproval(screen: string): boolean {
   )
 }
 
-/** Keys that move the highlight from the focused option to `target` and press Enter. */
-export function keysToChoose(options: DialogOption[], target: DialogOption): string[] {
+/** Arrow keys that move the highlight from the focused option to `target`. Empty when it is already there. */
+export function movesTo(options: DialogOption[], target: DialogOption): string[] {
   const focused = options.findIndex(o => o.focused)
   const from = focused === -1 ? 0 : focused
   const to = options.indexOf(target)
   const keys: string[] = []
   for (let i = from; i < to; i++) keys.push('Down')
   for (let i = from; i > to; i--) keys.push('Up')
-  keys.push('Enter')
   return keys
+}
+
+/** Keys that move the highlight from the focused option to `target` and press Enter. */
+export function keysToChoose(options: DialogOption[], target: DialogOption): string[] {
+  return [...movesTo(options, target), 'Enter']
 }
 
 /**

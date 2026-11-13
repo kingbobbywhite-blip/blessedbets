@@ -383,4 +383,37 @@ describe('sessions in tmux', () => {
     assert.equal(stopped.data.status, 'offline')
     assert.equal(await t.tmux.has(`${t.cfg.tmuxPrefix}worker1`), false)
   })
+
+  it('never passes "default" as a permission mode, which Claude Code rejects', () => {
+    assert.ok(!t.sessions.claudeCommand({ name: 'w', role: 'worker', permission_mode: 'default' }).includes('--permission-mode'))
+    const edits = t.sessions.claudeCommand({ name: 'w', role: 'worker', permission_mode: 'acceptEdits' })
+    assert.equal(edits[edits.indexOf('--permission-mode') + 1], 'acceptEdits')
+  })
+
+  it('types messages into the terminal when Claude Code says channels are not available, and never over a question', async () => {
+    const work = fs.mkdtempSync(path.join(t.dataDir, 'work2-'))
+    const events = path.join(t.dataDir, 'fake-events.log')
+    const typed = () => fs.readFileSync(events, 'utf8')
+    const r = await t.api('POST', '/api/sessions', { name: 'worker2', cwd: work, prompt: 'first job', extra_args: ['--fake-no-channels'] })
+    assert.equal(r.data.ready, true, r.data.note + '\n' + (r.data.screen ?? ''))
+    assert.match(r.data.note, /not available on this account.*typed into its terminal/)
+    assert.equal(r.data.session.delivery, 'keys')
+    await waitFor(() => /TYPED \[switchboard from="user" via="spawn" id="\d+"\] first job/.test(typed()), 'the first prompt, typed')
+
+    const next = await t.api('POST', '/api/messages', { to: 'worker2', body: 'second job', kind: 'voice', meta: { via: 'voice' } })
+    await waitFor(() => typed().includes(`[switchboard from="user" via="voice" id="${next.data.id}"] second job`), 'a later message, typed')
+    await waitFor(async () => (await t.api('GET', '/api/messages?with=worker2')).data.find((m: any) => m.id === next.data.id)?.delivered_at, 'delivery recorded')
+
+    // With an approval on its screen, typing would answer it: the message waits.
+    await t.api('POST', '/api/sessions/worker2/keys', { text: '/approve-me', enter: true })
+    await waitFor(async () => /Do you want to proceed/.test((await t.api('GET', '/api/sessions/worker2/screen')).data.screen), 'the approval on screen')
+    const held = await t.api('POST', '/api/messages', { to: 'worker2', body: 'third job' })
+    await new Promise(r => setTimeout(r, 1200))
+    assert.ok(!typed().includes('third job'), 'nothing typed over the approval')
+    await t.api('POST', '/api/sessions/worker2/keys', { keys: ['Enter'] }) // you answer it
+    await waitFor(async () => !/Do you want to proceed/.test((await t.api('GET', '/api/sessions/worker2/screen')).data.screen), 'the approval gone')
+    await t.sessions.pollOnce()
+    await waitFor(() => typed().includes(`id="${held.data.id}"] third job`), 'the held message, typed once the screen is clear')
+    await t.api('POST', '/api/sessions/worker2/stop', {})
+  })
 })

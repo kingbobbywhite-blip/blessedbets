@@ -18,6 +18,8 @@ export interface ParsedChunk {
 
 const MAX_BODY = 20_000
 const CHANNEL_ID_RE = /<channel\b[^>]*\bsource="[^"]*switchboard[^"]*"[^>]*\bmessage_id="(\d+)"/g
+/** The same message typed into the terminal, for sessions without a channel. */
+const TYPED_ID_RE = /\[switchboard from="[^"]*"[^\]]*\bid="(\d+)"\]/g
 
 /** Read new lines of a Claude Code transcript (.jsonl) starting at `offset`. */
 export async function readTranscript(file: string, offset: number): Promise<ParsedChunk> {
@@ -52,10 +54,12 @@ export function parseTranscriptLines(text: string): Omit<ParsedChunk, 'consumed'
     }
     const content = row.message?.content
     const flat = typeof content === 'string' ? content : Array.isArray(content) ? JSON.stringify(content) : ''
-    if (flat.includes('<channel')) {
+    if (flat.includes('<channel') || flat.includes('[switchboard from=')) {
       const raw = typeof content === 'string' ? content : collectText(content, true)
+      const before = seen.size
       for (const m of raw.matchAll(CHANNEL_ID_RE)) seen.add(Number(m[1]))
-      continue // the message itself is already stored, with who sent it
+      for (const m of raw.matchAll(TYPED_ID_RE)) seen.add(Number(m[1]))
+      if (seen.size > before) continue // the message itself is already stored, with who sent it
     }
     if (row.isSidechain || row.isMeta || !row.uuid) continue
     if (row.type !== 'user' && row.type !== 'assistant') continue
