@@ -1,0 +1,72 @@
+name: Switchboard
+
+# Switchboard (switchboard/) has its own dependencies and checks; the app's CI
+# never looks at it, and this only runs when it changes.
+on:
+  push:
+    branches: [main]
+    paths: ['switchboard/**', '.github/workflows/switchboard.yml']
+  pull_request:
+    paths: ['switchboard/**', '.github/workflows/switchboard.yml']
+
+concurrency:
+  group: switchboard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hub:
+    name: Hub, channel and web UI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: switchboard
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: switchboard/package-lock.json
+
+      - name: tmux
+        run: (command -v tmux || (sudo apt-get update && sudo apt-get install -y tmux)) && tmux -V
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        # Unit and integration tests: an embedded Postgres, the real channel server over MCP,
+        # and tmux sessions running a stand-in for claude. No model is ever called.
+        run: npm test
+
+  app:
+    name: Phone app
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: switchboard/mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: switchboard/mobile/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Bundle for iOS and Android
+        # The same bundle `switchboard app publish` serves to phones.
+        run: npx expo export --platform ios --platform android --output-dir /tmp/switchboard-export
+        env:
+          EXPO_OFFLINE: '1'
+          CI: '1'

@@ -1,0 +1,10 @@
+#!/bin/sh
+# Resolve symlinks (npm link, ~/bin) to find the package.
+SELF="$0"
+while [ -h "$SELF" ]; do
+  DIR=$(cd "$(dirname "$SELF")" && pwd)
+  SELF=$(readlink "$SELF")
+  case "$SELF" in /*) ;; *) SELF="$DIR/$SELF" ;; esac
+done
+ROOT=$(cd "$(dirname "$SELF")/.." && pwd)
+exec node "$ROOT/src/cli.ts" "$@"
