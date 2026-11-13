@@ -9,7 +9,7 @@ import QRCode from 'qrcode'
 import type { WebSocket } from 'ws'
 import type { ChannelToHub, MessageKind, PttAction, UiToHub } from '../shared/protocol.ts'
 import { NAME_RE, PTT_ACTIONS, SYSTEM, USER, isValidName } from '../shared/protocol.ts'
-import { tokenMatches } from './config.ts'
+import { codeStamp, tokenMatches } from './config.ts'
 import type { Hub } from './hub.ts'
 import type { SessionManager } from './sessions.ts'
 import * as store from './store.ts'
@@ -110,7 +110,10 @@ export async function buildServer(hub: Hub, sessions: SessionManager, opts: { lo
   })
 
   // --- basics ----------------------------------------------------------------
-  app.get('/api/health', async () => ({ ok: true, name: 'switchboard', version: VERSION }))
+  // The code this hub was started from; `switchboard up` restarts a hub whose files have changed since.
+  const stamp = codeStamp('hub')
+  const channelStamp = codeStamp('channel')
+  app.get('/api/health', async () => ({ ok: true, name: 'switchboard', version: VERSION, stamp, channel_stamp: channelStamp }))
 
   app.get('/api/info', async (req: Req) => ({
     version: VERSION,

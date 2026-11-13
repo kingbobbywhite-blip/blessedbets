@@ -9,7 +9,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
-import { isExampleUrl, loadConfig, PACKAGE_ROOT, setEnvVar, type Config } from './hub/config.ts'
+import { codeStamp, isExampleUrl, loadConfig, PACKAGE_ROOT, setEnvVar, type Config } from './hub/config.ts'
 import { Tmux, shellQuote } from './hub/tmux.ts'
 import { formatCheck, probeTools, toolChecks } from './preflight.ts'
 import { pairingPage, terminalQrFor } from './qr.ts'
@@ -79,6 +79,10 @@ async function api<T = any>(method: string, p: string, body?: unknown, timeoutMs
   }
   const text = await res.text()
   const data = text ? (() => { try { return JSON.parse(text) } catch { return text } })() : null
+  if (res.status === 404 && /^Route /.test(String((data as { message?: string } | null)?.message ?? ''))) {
+    // Fastify's own "no such route": the hub was started before this command learned to ask for it.
+    fail('The hub is running an older version than this command. Run "switchboard up" (it restarts the hub), then try again.')
+  }
   if (!res.ok) fail((data && (data as { error?: string }).error) || `${res.status} ${res.statusText}`)
   return data as T
 }
@@ -88,13 +92,32 @@ function fail(msg: string): never {
   process.exit(1)
 }
 
-async function hubUp(): Promise<boolean> {
+interface Health {
+  ok: boolean
+  stamp?: string
+  channel_stamp?: string
+}
+
+async function hubHealth(): Promise<Health | null> {
   try {
     const r = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(1500) })
-    return r.ok
+    return r.ok ? ((await r.json()) as Health) : null
   } catch {
-    return false
+    return null
   }
+}
+
+async function hubUp(): Promise<boolean> {
+  return Boolean(await hubHealth())
+}
+
+/** Stop the hub that `switchboard up` started. Sessions are separate tmux sessions and keep running. */
+async function stopHub(): Promise<boolean> {
+  if (!(await tmux.has(HUB_TMUX))) return false
+  await tmux.keys(HUB_TMUX, ['C-c']).catch(() => {})
+  for (let i = 0; i < 40 && (await hubUp()); i++) await new Promise(r => setTimeout(r, 250))
+  await tmux.kill(HUB_TMUX)
+  return true
 }
 
 function flags(argv: string[], options: Record<string, { type: 'string' | 'boolean'; short?: string }>) {
@@ -132,7 +155,20 @@ switch (cmd) {
       console.log('Paste each command above into this terminal, one at a time, then run: switchboard up')
       process.exit(1)
     }
-    if (!(await hubUp())) {
+    // A hub started before the last update (git pull, or a session's own edits) is running old code.
+    let health = await hubHealth()
+    let toolsChanged = false
+    if (health && health.stamp !== codeStamp('hub')) {
+      if (await tmux.has(HUB_TMUX)) {
+        console.log('Switchboard was updated since the hub started. Restarting the hub (your sessions keep running)...')
+        toolsChanged = Boolean(health.channel_stamp) && health.channel_stamp !== codeStamp('channel')
+        await stopHub()
+        health = null
+      } else {
+        console.log('Note: the hub is running older code than this command and was not started by "switchboard up". Restart it the way you start it.\n')
+      }
+    }
+    if (!health) {
       if (await tmux.has(HUB_TMUX)) await tmux.kill(HUB_TMUX)
       const env: Record<string, string> = {}
       for (const [k, v] of Object.entries(process.env)) {
@@ -158,6 +194,13 @@ switch (cmd) {
       console.log(`${r.session.name}: ${r.note}`)
       if (r.screen) console.log(r.screen)
     }
+    if (toolsChanged) {
+      const running = sessions.filter(s => s.managed && !['offline', 'exited'].includes(s.status)).map(s => s.name)
+      if (running.length) {
+        console.log(`\nThe tools inside sessions were updated too. Each running session gets them when restarted (it keeps its conversation):`)
+        for (const name of running) console.log(`  switchboard restart ${name}`)
+      }
+    }
     if (isExampleUrl(cfg.publicUrl)) console.log(`\nNote: ${cfg.publicUrl} is the example address, not yours. Run: switchboard tailscale`)
     console.log(`\nWeb UI: ${base}/#token=${cfg.token}`)
     console.log(`Orchestrator terminal: switchboard attach ${cfg.orchestrator}`)
@@ -175,10 +218,7 @@ switch (cmd) {
         }
       }
     }
-    if (await tmux.has(HUB_TMUX)) {
-      await tmux.keys(HUB_TMUX, ['C-c'])
-      for (let i = 0; i < 20 && (await hubUp()); i++) await new Promise(r => setTimeout(r, 250))
-      await tmux.kill(HUB_TMUX)
+    if (await stopHub()) {
       console.log('Hub stopped.')
     } else console.log('The hub is not running under switchboard up.')
     break

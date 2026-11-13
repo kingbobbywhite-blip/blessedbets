@@ -227,6 +227,17 @@ Postgres is built in: with no `DATABASE_URL`, the hub runs a real Postgres from 
 `embedded-postgres` package, keeping its data in `~/.switchboard/postgres`. To use your own,
 set `DATABASE_URL` in `switchboard/.env` (`docker compose up -d` in `switchboard/` starts one).
 
+### Updating
+
+```bash
+cd ~/blessedbets/switchboard && git checkout -- package-lock.json && git pull && switchboard up
+```
+
+`switchboard up` notices that the files are newer than the running hub and restarts it. Your
+sessions keep running and reconnect within seconds; it tells you if any of them need a restart
+to get new tools. (The `git checkout` only undoes npm's own edits to the lockfile, which
+otherwise stop a pull.)
+
 ## Using it
 
 **From a browser:** the session list shows everyone and what they are doing. Open one to

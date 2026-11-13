@@ -163,6 +163,34 @@ export function splitArgs(input: string): string[] {
   return out
 }
 
+/**
+ * A fingerprint of the code on disk. A running hub reports the one it started with, so
+ * `switchboard up` can tell the hub is older than the files (after a `git pull`, or after a
+ * session edited Switchboard itself) and restart it. `channel` covers what runs inside each
+ * session instead: its tools and hook.
+ */
+export function codeStamp(part: 'hub' | 'channel'): string {
+  const src = path.join(PACKAGE_ROOT, 'src')
+  const files: string[] = []
+  const walk = (dir: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) walk(full)
+      else if (entry.name.endsWith('.ts')) files.push(path.relative(src, full))
+    }
+  }
+  walk(src)
+  const hash = crypto.createHash('sha1')
+  for (const rel of files.sort()) {
+    const inSession = rel.startsWith(`channel${path.sep}`) || rel === 'hook.ts'
+    const shared = rel.startsWith(`shared${path.sep}`)
+    if (part === 'channel' ? !(inSession || shared) : inSession) continue
+    hash.update(rel)
+    hash.update(fs.readFileSync(path.join(src, rel)))
+  }
+  return hash.digest('hex').slice(0, 12)
+}
+
 /** The placeholder address from the instructions, pasted as-is. */
 export function isExampleUrl(url: string | null | undefined): boolean {
   return Boolean(url && /your-mac\.tail1234|REPLACE-ME|your-tailnet|PASTE/i.test(url))

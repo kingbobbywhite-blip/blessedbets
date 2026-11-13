@@ -7,6 +7,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { WebSocket } from 'ws'
 import { z } from 'zod'
+import { codeStamp } from '../src/hub/config.ts'
 import { updatesRoot } from '../src/hub/updates.ts'
 import { FIXTURES, startTestHub, waitFor, type TestHub } from './helpers.ts'
 
@@ -52,7 +53,9 @@ async function fakeClaude(session: string, role = 'worker') {
 describe('auth', () => {
   it('rejects a wrong token and serves health without one', async () => {
     assert.equal((await t.api('GET', '/api/sessions', undefined, 'wrong')).status, 401)
-    assert.equal((await fetch(`${t.base}/api/health`)).status, 200)
+    const health = await fetch(`${t.base}/api/health`)
+    assert.equal(health.status, 200)
+    assert.equal((await health.json()).stamp, codeStamp('hub'), 'the hub says which code it was started from')
     assert.equal((await fetch(`${t.base}/`)).status, 200) // the web UI shell
   })
 })
