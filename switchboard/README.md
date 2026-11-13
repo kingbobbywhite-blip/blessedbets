@@ -440,6 +440,11 @@ the session's own transcript, so Claude really has it).
 
 ## Troubleshooting
 
+- **"EPERM: operation not permitted, uv_cwd" when the hub starts.** tmux was started from
+  somewhere with less access than your terminal, and passes that on to everything it runs.
+  `switchboard up` checks for this and restarts tmux from your terminal by itself, unless tmux
+  is also running sessions of your own (then it tells you what to close). If even a fresh tmux
+  is kept out, it prints the macOS setting that lets it in.
 - **A session shows "channel not connected".** It is running but its channel has not reached
   the hub: `switchboard screen <name>`, then `/mcp` in its terminal shows why. A hub restart
   heals itself within seconds.

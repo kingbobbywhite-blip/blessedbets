@@ -13,6 +13,7 @@ import { codeStamp, isExampleUrl, loadConfig, PACKAGE_ROOT, setEnvVar, type Conf
 import { Tmux, shellQuote } from './hub/tmux.ts'
 import { formatCheck, probeTools, toolChecks } from './preflight.ts'
 import { pairingPage, terminalQrFor } from './qr.ts'
+import { ensureUsableTmux, isPermissionProblem, macFix, probeTmux } from './tmuxcheck.ts'
 import { updateIdFor, updatesRoot } from './hub/updates.ts'
 import type { Message, SearchHit, Session, Task } from './shared/protocol.ts'
 
@@ -159,6 +160,14 @@ switch (cmd) {
       console.log('Paste each command above into this terminal, one at a time, then run: switchboard up')
       process.exit(1)
     }
+    // Everything below runs inside tmux, so first make sure tmux can work in this folder at all.
+    const usable = await ensureUsableTmux(tmux, PACKAGE_ROOT, cfg.tmuxPrefix, line => console.log(line))
+    if (!usable.ok) {
+      console.log('')
+      for (const line of usable.message) console.log(line)
+      process.exit(1)
+    }
+    if (usable.restarted) console.log('tmux restarted, and it can open the Switchboard folder now.\n')
     // A hub started before the last update (git pull, or a session's own edits) is running old code.
     let health = await hubHealth()
     let toolsChanged = false
@@ -180,14 +189,22 @@ switch (cmd) {
       }
       await tmux.newSession({ name: HUB_TMUX, cwd: PACKAGE_ROOT, command: [process.execPath, path.join(PACKAGE_ROOT, 'src/hub/main.ts')], env })
       process.stdout.write('Starting the hub')
-      for (let i = 0; i < 120 && !(await hubUp()); i++) {
+      // The first start creates the database, which can take half a minute; a hub that died stops the wait.
+      for (let i = 0; i < 180 && !(await hubUp()); i++) {
+        if (await tmux.paneDead(HUB_TMUX)) break
         await new Promise(r => setTimeout(r, 500))
         process.stdout.write('.')
       }
       console.log('')
       if (!(await hubUp())) {
-        console.log(await tmux.capture(HUB_TMUX, 40).catch(() => ''))
-        fail(`The hub did not start. Its terminal is above (tmux attach -t ${HUB_TMUX}).`)
+        const screen = (await tmux.capture(HUB_TMUX, 60).catch(() => '')).replace(/\n{3,}/g, '\n\n').trim()
+        console.log(screen)
+        if (isPermissionProblem(screen)) {
+          console.log('')
+          for (const line of macFix(PACKAGE_ROOT, cfg.tmuxBin)) console.log(line)
+          process.exit(1)
+        }
+        fail(`The hub did not start; what it printed is above. To look again: switchboard attach hub`)
       }
     }
     if (missing.length) {
@@ -517,7 +534,12 @@ async function doctor(c: Config) {
   const ok = (label: string, good: boolean, detail: string) => console.log(`${good ? '✓' : '✗'} ${label.padEnd(18)} ${detail}`)
   const nodeOk = Number(process.versions.node.split('.')[0]) > 22 || (process.versions.node.startsWith('22.') && Number(process.versions.node.split('.')[1]) >= 18)
   ok('Node', nodeOk, process.versions.node + (nodeOk ? '' : ' (need 22.18 or newer)'))
-  for (const check of toolChecks(probeTools(c))) console.log(formatCheck(check).join('\n'))
+  const tools = toolChecks(probeTools(c))
+  for (const check of tools) console.log(formatCheck(check).join('\n'))
+  if (tools.find(t => t.label === 'tmux')?.ok) {
+    const probe = await probeTmux(tmux, PACKAGE_ROOT, c.tmuxPrefix)
+    ok('tmux can work here', probe.ok, probe.ok ? PACKAGE_ROOT : `${probe.detail.slice(0, 140)} (switchboard up repairs this)`)
+  }
   const up = await hubUp()
   ok('Hub', up, up ? base : `not running at ${base} (switchboard up)`)
   if (up) {

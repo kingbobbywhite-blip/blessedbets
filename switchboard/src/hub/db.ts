@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import pg from 'pg'
@@ -68,6 +69,41 @@ export async function openDatabase(cfg: Config, log: (msg: string) => void = () 
     log(`Creating the embedded Postgres cluster in ${dir}`)
     await server.initialise()
   }
+  const connect = () =>
+    new pg.Pool({ host: '127.0.0.1', port: cfg.embeddedPgPort, user: 'switchboard', password, database: 'switchboard', max: 10 })
+
+  // A hub that crashed leaves its Postgres running, and a second one cannot start on the same
+  // files. Use the one that is there.
+  const running = runningPostmaster(dir)
+  if (running) {
+    const pool = connect()
+    try {
+      await pool.query('select 1')
+      await migrate(pool)
+      log(`Using the database already running in ${dir} (left by a hub that did not shut down cleanly).`)
+      return {
+        pool,
+        description: `embedded Postgres in ${dir} (port ${cfg.embeddedPgPort})`,
+        async close() {
+          await pool.end()
+          try {
+            process.kill(running, 'SIGINT') // Postgres's own "fast shutdown"
+          } catch {
+            // already gone
+          }
+        },
+      }
+    } catch (err) {
+      await pool.end().catch(() => {})
+      log(`A Postgres is running in ${dir} but did not let the hub in (${(err as Error).message}); starting a fresh one.`)
+      try {
+        process.kill(running, 'SIGINT')
+      } catch {
+        // already gone
+      }
+      for (let i = 0; i < 50 && runningPostmaster(dir); i++) await new Promise(r => setTimeout(r, 200))
+    }
+  }
   removeStalePidFile(dir)
   await server.start()
   try {
@@ -75,14 +111,7 @@ export async function openDatabase(cfg: Config, log: (msg: string) => void = () 
   } catch (err) {
     if (!/already exists/i.test(String((err as Error).message))) throw err
   }
-  const pool = new pg.Pool({
-    host: '127.0.0.1',
-    port: cfg.embeddedPgPort,
-    user: 'switchboard',
-    password,
-    database: 'switchboard',
-    max: 10,
-  })
+  const pool = connect()
   await migrate(pool)
   return {
     pool,
@@ -94,20 +123,31 @@ export async function openDatabase(cfg: Config, log: (msg: string) => void = () 
   }
 }
 
-/** A crash leaves postmaster.pid behind and the next start refuses to run. */
-function removeStalePidFile(dir: string) {
+/** The pid of a Postgres still running on the files in `dir`, from its lock file, or null. */
+export function runningPostmaster(dir: string): number | null {
   const pidFile = path.join(dir, 'postmaster.pid')
-  if (!fs.existsSync(pidFile)) return
+  if (!fs.existsSync(pidFile)) return null
   const pid = Number.parseInt(fs.readFileSync(pidFile, 'utf8').split('\n')[0] ?? '', 10)
-  if (Number.isFinite(pid) && pid > 0) {
-    try {
-      process.kill(pid, 0)
-      return // still running; let Postgres report it
-    } catch {
-      // not running
-    }
+  if (!Number.isFinite(pid) || pid <= 0) return null
+  try {
+    process.kill(pid, 0)
+  } catch (err) {
+    // EPERM: alive but someone else's (when the hub runs as root, Postgres runs as its own user).
+    if ((err as NodeJS.ErrnoException).code !== 'EPERM') return null
   }
-  fs.rmSync(pidFile, { force: true })
+  // After a restart the number can belong to some other program: only a postgres counts.
+  try {
+    const name = execFileSync('ps', ['-p', String(pid), '-o', 'comm='], { encoding: 'utf8', timeout: 5000 }).trim()
+    return /postgres|postmaster/i.test(name) ? pid : null
+  } catch {
+    return null
+  }
+}
+
+/** A crash leaves postmaster.pid behind, and Postgres refuses to start while it names a live process. */
+function removeStalePidFile(dir: string) {
+  if (runningPostmaster(dir)) return // still running; let Postgres report it
+  fs.rmSync(path.join(dir, 'postmaster.pid'), { force: true })
 }
 
 export async function migrate(pool: pg.Pool): Promise<void> {

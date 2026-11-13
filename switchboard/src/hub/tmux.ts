@@ -104,6 +104,13 @@ export class Tmux {
     await this.exec(['respawn-pane', '-k', '-t', pane(opts.name), '-c', opts.cwd, ...envArgs, opts.command.map(shellQuote).join(' ')])
   }
 
+  /** Stop this tmux server and every session in it. */
+  async killServer(): Promise<void> {
+    await this.exec(['kill-server'], { allowFail: true })
+    // The server takes a moment to go; a command sent before then would reach the old one.
+    for (let i = 0; i < 20 && (await this.exec(['list-sessions'], { allowFail: true })).trim(); i++) await sleep(100)
+  }
+
   async kill(name: string): Promise<void> {
     await this.exec(['kill-session', '-t', exact(name)], { allowFail: true })
   }
