@@ -231,7 +231,7 @@ export const ORCHESTRATOR_TOOLS: ToolDef[] = [
   {
     name: 'send_keys',
     description:
-      'Type into a session\'s terminal: `text` literally (with enter=true to submit it), and/or `keys` by name (Enter, Escape, Up, Down, Tab, BSpace, C-c, or a digit to pick a menu option). For answering a prompt on its screen; to give it work, prefer send_message.',
+      'Type into a session\'s terminal: `text` literally (with enter=true to submit it), and/or `keys` by name (Enter, Escape, Up, Down, Tab, BSpace, C-c, or a digit to pick a menu option). For menus and questions on its screen; to give it work, prefer send_message. Tool approvals and safety questions (trust this folder, development channels) are refused: those are the human\'s to answer.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -263,7 +263,9 @@ export async function runTool(ctx: ToolContext, name: string, a: Args): Promise<
       if (!to) throw new Error('to is required')
       if (to === ctx.session) throw new Error('That is you. Use reply to answer the user.')
       const m = (await ctx.api('POST', '/api/messages', { from: ctx.session, to, body: s(a.text) })) as Message
-      return `Sent to ${to} (message ${m.id}).${m.delivered_at ? '' : ' It will be pushed into that session as soon as it is connected.'}`
+      if (to === 'user') return `Sent to the user (message ${m.id}).`
+      const target = (await ctx.api('GET', `/api/sessions/${to}`)) as Session
+      return `Sent to ${to} (message ${m.id}).${target.connected ? '' : ` ${to} is not connected right now; it gets the message as soon as it is.`}`
     }
     case 'list_sessions': {
       const sessions = (await ctx.api('GET', `/api/sessions${a.include_archived ? '?archived=1' : ''}`)) as Session[]
@@ -383,6 +385,7 @@ export async function runTool(ctx: ToolContext, name: string, a: Args): Promise<
         text: a.text === undefined ? undefined : s(a.text),
         enter: a.enter === true,
         keys: Array.isArray(a.keys) ? a.keys.map(String) : undefined,
+        by: ctx.session,
       })
       return 'Done. Use read_screen to see the result.'
     }

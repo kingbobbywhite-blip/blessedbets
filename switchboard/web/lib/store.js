@@ -2,8 +2,12 @@
 import { createContext } from 'preact'
 import { useContext, useEffect, useReducer, useRef, useCallback } from 'preact/hooks'
 import { api, connectSocket, deviceId, getToken } from './api.js'
-import { chime, loadVoiceSettings, saveVoiceSettings, speak, speakable, stopSpeaking, startListening, keepAwake } from './voice.js'
+import { chime, deviceSpeechRecognition, loadVoiceSettings, saveVoiceSettings, speak, speakable, stopSpeaking, startListening, keepAwake } from './voice.js'
 import { runWebAction, webCapabilities } from './actions.js'
+
+const NO_TRANSCRIPTION =
+  'This browser cannot turn speech into text here. On an iPhone that works in Safari (with Dictation on) but not from the home-screen icon. ' +
+  'To talk from anywhere, add GROQ_API_KEY or OPENAI_API_KEY to switchboard/.env and restart the hub, or use the Switchboard phone app.'
 
 export const Store = createContext(null)
 export const useStore = () => useContext(Store)
@@ -134,7 +138,7 @@ export function useAppStore() {
     dispatch({ type: 'set', patch: { toast: { text, kind, at: Date.now() } } })
     setTimeout(() => {
       if (ref.current.toast?.text === text) dispatch({ type: 'set', patch: { toast: null } })
-    }, 4500)
+    }, Math.max(4500, text.length * 70))
   }, [])
 
   const reportState = useCallback(() => {
@@ -186,7 +190,15 @@ export function useAppStore() {
     stopSpeaking()
     const s = ref.current
     const hubStt = Boolean(s.info?.stt)
-    const mode = s.voice.transcribe === 'device' ? 'device' : s.voice.transcribe === 'hub' ? 'hub' : hubStt ? 'hub' : 'device'
+    const deviceStt = Boolean(deviceSpeechRecognition())
+    let mode = s.voice.transcribe === 'device' ? 'device' : s.voice.transcribe === 'hub' ? 'hub' : hubStt ? 'hub' : 'device'
+    if (mode === 'device' && !deviceStt) mode = hubStt ? 'hub' : null
+    if (mode === 'hub' && !hubStt) mode = deviceStt ? 'device' : null
+    if (!mode) {
+      chime('error')
+      toast(NO_TRANSCRIPTION, 'error')
+      return
+    }
     try {
       capture.current = startListening({ mode, onInterim: text => dispatch({ type: 'set', patch: { interim: text } }) })
     } catch (err) {
@@ -216,7 +228,7 @@ export function useAppStore() {
       }
     } catch (err) {
       chime('error')
-      toast(err.message, 'error')
+      toast(/not-allowed|service-not-allowed/.test(err.message) ? NO_TRANSCRIPTION : err.message, 'error')
       dispatch({ type: 'set', patch: { listening: false } })
     } finally {
       capture.current = null

@@ -21,15 +21,30 @@ function storageSet(key, value) {
 
 let memoryToken = null
 
-/** The token arrives once in the URL fragment (from the QR code) and is kept in this browser. */
+/**
+ * The token arrives once in the address (from the QR code, or from the home-screen icon's start
+ * address) and is kept in this browser. It is taken out of the address bar straight away.
+ */
 export function takeTokenFromUrl() {
-  const m = /[#&]token=([^&]+)/.exec(location.hash)
+  const m = /[#&]token=([^&]+)/.exec(location.hash) || /[?&]token=([^&#]+)/.exec(location.search)
   if (m) {
     const token = decodeURIComponent(m[1])
     storageSet(TOKEN_KEY, token)
     memoryToken = token
-    history.replaceState(null, '', location.pathname + location.search + '#/')
+    history.replaceState(null, '', location.pathname + '#/')
   }
+  advertiseInstallAddress()
+}
+
+/**
+ * A page added to a phone's home screen gets storage of its own, so it would open unpaired.
+ * Pointing the manifest link at /manifest.webmanifest?token=... makes the hub answer with a start
+ * address that carries the pairing, which is what the phone saves with the icon.
+ */
+export function advertiseInstallAddress() {
+  const token = getToken()
+  const link = document.querySelector('link[rel="manifest"]')
+  if (link) link.setAttribute('href', token ? `manifest.webmanifest?token=${encodeURIComponent(token)}` : 'manifest.webmanifest')
 }
 
 export function getToken() {
@@ -39,6 +54,7 @@ export function getToken() {
 export function setToken(token) {
   memoryToken = token
   storageSet(TOKEN_KEY, token)
+  advertiseInstallAddress()
 }
 
 export function deviceId() {

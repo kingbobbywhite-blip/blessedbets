@@ -3,8 +3,9 @@ import { describe, it } from 'node:test'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { isExampleUrl, setEnvVar, splitArgs, tokenMatches } from '../src/hub/config.ts'
-import { detectDialog, keysToChoose, parseOptions, screenStatus } from '../src/hub/dialogs.ts'
+import { isExampleUrl, resolveBin, setEnvVar, splitArgs, tokenMatches } from '../src/hub/config.ts'
+import { formatCheck, toolChecks, type ToolProbe } from '../src/preflight.ts'
+import { detectDialog, isToolApproval, keysToChoose, parseOptions, screenStatus } from '../src/hub/dialogs.ts'
 import { channelWarning } from '../src/hub/sessions.ts'
 import { shellQuote } from '../src/hub/tmux.ts'
 import { parseTranscriptLines } from '../src/hub/transcripts.ts'
@@ -52,6 +53,29 @@ describe('startup dialogs', () => {
     const d = detectDialog('New MCP server found in .mcp.json: evil\n❯ 1. Use this MCP server\n  2. Continue without using this MCP server', { autoAccept: true })!
     assert.equal(d.kind, 'mcp_consent')
     assert.equal(d.answer, null)
+  })
+
+  it('leaves the no-permission-checks warning for the human, always', () => {
+    const d = detectDialog('WARNING: Claude Code running in Bypass Permissions mode\n❯ 1. No, exit\n  2. Yes, I accept', { autoAccept: true })!
+    assert.equal(d.kind, 'bypass_permissions')
+    assert.equal(d.answer, null)
+  })
+
+  it('reads the development-channels warning even when its choices are not numbered', () => {
+    const screen = 'WARNING: Loading development channels\nChannels: server:switchboard\n\n ❯ I am using this for local development\n   Exit'
+    const d = detectDialog(screen, { autoAccept: true })!
+    assert.equal(d.kind, 'dev_channels')
+    assert.deepEqual(keysToChoose(d.options, d.answer!), ['Enter'])
+    const onExit = detectDialog(screen.replace(' ❯ I am', '   I am').replace('   Exit', ' ❯ Exit'), { autoAccept: true })!
+    assert.deepEqual(keysToChoose(onExit.options, onExit.answer!), ['Up', 'Enter'])
+  })
+
+  it('tells a tool approval from other menus', () => {
+    const approval = `Bash command\n  rm -rf build\nDo you want to proceed?\n❯ 1. Yes\n  2. Yes, and don't ask again for rm commands\n  3. No, and tell Claude what to do differently (esc)`
+    assert.ok(isToolApproval(approval))
+    assert.ok(isToolApproval('Edit file\n❯ 1. Yes\n  2. Yes, allow all edits during this session (shift+tab)\n  3. No, and tell Claude what to do differently (esc)'))
+    assert.ok(!isToolApproval('Which model?\n❯ 1. Opus\n  2. Sonnet'))
+    assert.ok(!isToolApproval('Do you want to proceed with the refactor? I can also wait.'), 'a question in the conversation is not an approval')
   })
 
   it('ignores numbered lists in the conversation', () => {
@@ -152,9 +176,60 @@ describe('small helpers', () => {
     assert.equal(fs.readFileSync(file, 'utf8'), 'OPENAI_API_KEY=x\nSWITCHBOARD_PUBLIC_URL=https://bobs-mac.tail9f2c.ts.net\n')
     assert.ok(!isExampleUrl('https://bobs-mac.tail9f2c.ts.net'))
   })
+  it('finds a command the shell cannot, where installers put it', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-bin-'))
+    const tool = path.join(dir, 'sometool')
+    fs.writeFileSync(tool, '#!/bin/sh\n', { mode: 0o755 })
+    assert.equal(resolveBin('sometool', [dir], { PATH: '/nonexistent' }), tool, 'full path when only an installer directory has it')
+    assert.equal(resolveBin('sometool', [], { PATH: dir }), 'sometool', 'bare name when the PATH has it')
+    assert.equal(resolveBin('sometool', [], { PATH: '/nonexistent' }), 'sometool', 'bare name when it is nowhere')
+    assert.equal(resolveBin('/abs/tool', [dir], { PATH: dir }), '/abs/tool')
+  })
   it('compares tokens', () => {
     assert.ok(tokenMatches('abc', 'abc'))
     assert.ok(!tokenMatches('abc', 'abd'))
     assert.ok(!tokenMatches('abc', undefined))
+  })
+})
+
+describe('what is missing on this computer', () => {
+  const mac: ToolProbe = { platform: 'darwin', tmuxVersion: null, brew: null, claudeBin: 'claude', claudeVersion: null, loggedIn: null, claudeOnPath: false }
+  const fixes = (p: ToolProbe) => Object.fromEntries(toolChecks(p).map(c => [c.label, c]))
+
+  it('on a Mac with nothing installed, walks through Homebrew, tmux and Claude Code', () => {
+    const c = fixes(mac)
+    assert.equal(c.tmux.ok, false)
+    assert.ok(c.tmux.fix.some(l => l.includes('Homebrew/install')))
+    assert.equal(c.tmux.fix.at(-1), 'brew install tmux')
+    assert.equal(c['Claude Code'].ok, false)
+    assert.equal(c['Claude Code'].fix[0], 'curl -fsSL https://claude.ai/install.sh | bash')
+  })
+
+  it('uses Homebrew by its full path when the shell cannot find it', () => {
+    assert.deepEqual(fixes({ ...mac, brew: '/opt/homebrew/bin/brew' }).tmux.fix, ['/opt/homebrew/bin/brew install tmux'])
+  })
+
+  it('asks for a login, by full path when the shell cannot find claude', () => {
+    const c = fixes({ ...mac, tmuxVersion: 'tmux 3.5a', claudeBin: '/Users/me/.local/bin/claude', claudeVersion: '2.1.322 (Claude Code)', loggedIn: false })
+    assert.equal(c.tmux.ok, true)
+    assert.equal(c['Claude Code'].ok, false)
+    assert.equal(c['Claude Code'].fix.at(-1), '/Users/me/.local/bin/claude')
+  })
+
+  it('rejects a Claude Code too old for channels and a tmux too old for -e', () => {
+    const c = fixes({ ...mac, tmuxVersion: 'tmux 2.9', brew: 'brew', claudeVersion: '2.1.79 (Claude Code)', loggedIn: true, claudeOnPath: true })
+    assert.equal(c.tmux.ok, false)
+    assert.deepEqual(c.tmux.fix, ['brew upgrade tmux'])
+    assert.deepEqual(c['Claude Code'].fix, ['claude update'])
+  })
+
+  it('passes when everything is there, and does not block on a login state it cannot read', () => {
+    const c = fixes({ ...mac, tmuxVersion: 'tmux 3.5a', claudeVersion: '2.1.80 (Claude Code)', loggedIn: null, claudeOnPath: true })
+    assert.ok(c.tmux.ok && c['Claude Code'].ok)
+    assert.deepEqual(formatCheck(c.tmux), ['✓ tmux               tmux 3.5a'])
+  })
+
+  it('on Linux, installs tmux with apt', () => {
+    assert.deepEqual(fixes({ ...mac, platform: 'linux' }).tmux.fix, ['sudo apt update && sudo apt install -y tmux'])
   })
 })

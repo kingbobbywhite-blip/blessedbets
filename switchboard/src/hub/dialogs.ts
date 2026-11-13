@@ -42,7 +42,7 @@ export function detectDialog(screen: string, opts: { autoAccept: boolean }): Dia
   // Only the bottom of the screen matters: older dialogs scroll up and stay in the capture.
   const tail = screen.split('\n').slice(-45).join('\n')
   const options = parseOptions(tail)
-  if (options.length < 2) return null
+  if (options.length < 2) return unnumberedDevChannels(tail, opts.autoAccept)
   const pick = (re: RegExp) => (opts.autoAccept ? (options.find(o => re.test(o.label)) ?? null) : null)
 
   if (/development channels?|local development/i.test(tail) && options.some(o => /local development/i.test(o.label))) {
@@ -52,13 +52,43 @@ export function detectDialog(screen: string, opts: { autoAccept: boolean }): Dia
     return { kind: 'trust_folder', options, answer: pick(/^yes\b/i) }
   }
   if (/bypass permissions mode/i.test(tail) && options.some(o => /yes, i accept/i.test(o.label))) {
-    return { kind: 'bypass_permissions', options, answer: pick(/yes, i accept/i) }
+    // Running with no permission checks at all is for you to accept, in the terminal, every time.
+    return { kind: 'bypass_permissions', options, answer: null }
   }
   if (/new MCP servers? found|MCP servers? (found|detected) in/i.test(tail)) {
     // A project's own .mcp.json can run anything; that stays your call.
     return { kind: 'mcp_consent', options, answer: null }
   }
   return { kind: 'unknown_select', options, answer: null }
+}
+
+/** The development-channels warning, in case a version draws its two choices without numbers. */
+function unnumberedDevChannels(tail: string, autoAccept: boolean): Dialog | null {
+  if (!/development channels?/i.test(tail)) return null
+  const lines = tail.split('\n')
+  const dev = lines.find(l => /I am using this for local development/i.test(l))
+  const exit = lines.find(l => /^[\s│|❯›>]*Exit\s*[│|]?\s*$/.test(l))
+  if (!dev || !exit) return null
+  const exitFocused = /[❯›>]/.test(exit) && !/[❯›>]/.test(dev)
+  const options: DialogOption[] = [
+    { number: 1, label: 'I am using this for local development', focused: !exitFocused },
+    { number: 2, label: 'Exit', focused: exitFocused },
+  ]
+  return { kind: 'dev_channels', options, answer: autoAccept ? options[0] : null }
+}
+
+/**
+ * A tool approval on screen ("Do you want to proceed?  1. Yes  2. Yes, and
+ * don't ask again...  3. No, and tell Claude what to do differently").
+ */
+export function isToolApproval(screen: string): boolean {
+  const tail = screen.split('\n').slice(-25).join('\n')
+  const options = parseOptions(tail)
+  if (options.length < 2 || !/^yes\b/i.test(options[0].label)) return false
+  return (
+    /do you want to (proceed|make this edit|create|allow|run|overwrite|use)/i.test(tail) ||
+    options.some(o => /don.t ask again|allow all edits|tell claude what to do/i.test(o.label))
+  )
 }
 
 /** Keys that move the highlight from the focused option to `target` and press Enter. */

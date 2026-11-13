@@ -24,6 +24,9 @@ export interface Config {
   /** The address phones and the Flic button use to reach the hub, e.g. https://mac.tailnet.ts.net */
   publicUrl: string | null
   tmuxPrefix: string
+  /** `tmux`, or its full path when it is installed somewhere the shell's PATH does not cover. */
+  tmuxBin: string
+  /** `claude`, or its full path (same reason). */
   claudeBin: string
   claudeArgs: string[]
   /** Name of the session that runs everything else. */
@@ -72,7 +75,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, opts: { quiet?:
     embeddedPgPort: intEnv(env.SWITCHBOARD_PG_PORT, 54329),
     publicUrl: env.SWITCHBOARD_PUBLIC_URL ? env.SWITCHBOARD_PUBLIC_URL.replace(/\/+$/, '') : null,
     tmuxPrefix: env.SWITCHBOARD_TMUX_PREFIX || 'sb-',
-    claudeBin: env.CLAUDE_BIN || 'claude',
+    tmuxBin: resolveBin(env.TMUX_BIN || 'tmux', TMUX_DIRS, env),
+    claudeBin: resolveBin(env.CLAUDE_BIN || 'claude', CLAUDE_DIRS, env),
     claudeArgs: splitArgs(env.SWITCHBOARD_CLAUDE_ARGS || ''),
     orchestrator: env.SWITCHBOARD_ORCHESTRATOR || 'boss',
     orchestratorCwd: path.resolve(expandHome(env.SWITCHBOARD_ORCHESTRATOR_CWD || path.join(PACKAGE_ROOT, 'orchestrator'))),
@@ -81,6 +85,46 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, opts: { quiet?:
     updatesPublic: env.SWITCHBOARD_UPDATES_PUBLIC !== '0',
     expoAccessToken: env.EXPO_ACCESS_TOKEN || null,
     packageRoot: PACKAGE_ROOT,
+  }
+}
+
+/** Where Homebrew puts things on Apple-silicon and Intel Macs; neither is on the PATH until Homebrew's "Next steps" are run. */
+export const BREW_DIRS = ['/opt/homebrew/bin', '/usr/local/bin', '/home/linuxbrew/.linuxbrew/bin']
+const TMUX_DIRS = [...BREW_DIRS, '/usr/bin']
+/** Claude Code's own installer uses ~/.local/bin, which a new Mac does not have on its PATH. */
+const CLAUDE_DIRS = ['~/.local/bin', '~/.claude/local', ...BREW_DIRS]
+
+/**
+ * Find a command the way the shell would, then in the places installers put it
+ * that the shell may not look. Returns the bare name when the PATH has it (or
+ * when it is nowhere, so the caller's "not found" still names it), and the full
+ * path when it only exists in one of `dirs`.
+ */
+export function resolveBin(name: string, dirs: string[], env: NodeJS.ProcessEnv = process.env): string {
+  if (name.includes('/')) return expandHome(name)
+  if (findOnPath(name, env)) return name
+  for (const dir of dirs) {
+    const full = path.join(expandHome(dir), name)
+    if (isExecutable(full)) return full
+  }
+  return name
+}
+
+export function findOnPath(name: string, env: NodeJS.ProcessEnv = process.env): string | null {
+  for (const dir of (env.PATH ?? '').split(path.delimiter)) {
+    if (!dir) continue
+    const full = path.join(dir, name)
+    if (isExecutable(full)) return full
+  }
+  return null
+}
+
+function isExecutable(file: string): boolean {
+  try {
+    fs.accessSync(file, fs.constants.X_OK)
+    return fs.statSync(file).isFile()
+  } catch {
+    return false
   }
 }
 

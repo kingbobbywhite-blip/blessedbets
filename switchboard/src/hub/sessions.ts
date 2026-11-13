@@ -2,10 +2,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { Session, SessionRole } from '../shared/protocol.ts'
 import { SYSTEM, USER, isValidName } from '../shared/protocol.ts'
-import { detectDialog, keysToChoose, screenStatus } from './dialogs.ts'
+import { detectDialog, isToolApproval, keysToChoose, screenStatus } from './dialogs.ts'
 import type { Hub } from './hub.ts'
 import * as store from './store.ts'
-import { BadRequest, NotFound } from './store.ts'
+import { BadRequest, Forbidden, NotFound } from './store.ts'
 import { Tmux, sleep } from './tmux.ts'
 import { expandHome } from './config.ts'
 
@@ -24,6 +24,8 @@ export interface SpawnOptions {
   by?: string
   /** Wait for startup to finish before returning. Default true. */
   wait?: boolean
+  /** Restarting a session keeps the settings it was first started with, whoever asks. */
+  inherited?: boolean
 }
 
 export interface SpawnResult {
@@ -98,6 +100,10 @@ export class SessionManager {
     const command = `${q(process.execPath)} ${q(path.join(this.cfg.packageRoot, 'src', 'hook.ts'))}`
     const entry = [{ hooks: [{ type: 'command', command, timeout: 10 }] }]
     const settings = {
+      // Switchboard's own tools (reply, send_message, the backlog, ...) never ask: a session that had
+      // to wait for an approval before it could answer you would be no use on a walk. Everything
+      // else it wants to do (Bash, edits, web) still asks, and that question goes to your phone.
+      permissions: { allow: [`mcp__${CHANNEL_SERVER_NAME}`] },
       hooks: {
         SessionStart: entry,
         UserPromptSubmit: entry,
@@ -122,6 +128,8 @@ export class SessionManager {
       this.writeMcpConfig(s.name, s.role),
       '--settings',
       this.writeSettings(),
+      // The orchestrator looks after Switchboard itself (the phone app, the web UI), wherever it works from.
+      ...(s.role === 'orchestrator' ? ['--add-dir', this.cfg.packageRoot] : []),
       '--dangerously-load-development-channels',
       `server:${CHANNEL_SERVER_NAME}`,
       '--name',
@@ -145,6 +153,13 @@ export class SessionManager {
       throw new BadRequest(`"${opts.name}" is not a usable session name: lowercase letters, digits, - and _, up to 40 characters.`)
     }
     if (this.spawning.has(name)) throw new BadRequest(`${name} is already starting`)
+    if (opts.by && opts.by !== USER && !opts.inherited) {
+      // A session may start other sessions, but not ones that run with no permission checks.
+      if (opts.permission_mode === 'bypassPermissions') {
+        throw new Forbidden('Only the human can start a session that skips permission checks (from the web UI or the switchboard command).')
+      }
+      opts = { ...opts, extra_args: undefined }
+    }
     const tmuxName = this.tmuxName(name)
     if (await this.tmux.has(tmuxName)) {
       if (!(await this.tmux.paneDead(tmuxName))) {
@@ -334,6 +349,7 @@ export class SessionManager {
       permission_mode: s.permission_mode,
       resume: opts.fresh ? null : s.claude_session_id,
       by: opts.by,
+      inherited: true,
     })
   }
 
@@ -346,8 +362,21 @@ export class SessionManager {
   }
 
   /** Named keys (Enter, Escape, Up, Down, Tab, C-c, digits) or text typed literally. */
-  async sendKeys(name: string, input: { keys?: string[]; text?: string; enter?: boolean }): Promise<void> {
+  async sendKeys(name: string, input: { keys?: string[]; text?: string; enter?: boolean }, by: string = USER): Promise<void> {
     const t = await this.requireTmux(name)
+    if (by !== USER) {
+      // Approving a tool, trusting a folder or accepting a warning is the human's answer to give.
+      // Another session may type into this terminal, but not answer those for them.
+      const screen = await this.tmux.capture(t).catch(() => '')
+      const dialog = detectDialog(screen, { autoAccept: false })
+      const what = isToolApproval(screen) ? 'a tool approval' : dialog && dialog.kind !== 'unknown_select' ? `a ${dialog.kind.replace(/_/g, ' ')} question` : null
+      if (what) {
+        throw new Forbidden(
+          `${name} is showing ${what}, and that answer belongs to the human: they get it on their phone and in the web UI. ` +
+            `Tell them ${name} is waiting instead of answering it.`,
+        )
+      }
+    }
     if (input.text) {
       if (input.enter) await this.tmux.submit(t, input.text)
       else await this.tmux.typeText(t, input.text)

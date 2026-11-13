@@ -279,6 +279,47 @@ describe('phone app updates', () => {
   })
 })
 
+describe('the home-screen icon', () => {
+  it('hands a paired page a start address that carries the pairing, and nobody else', async () => {
+    const plain = await (await fetch(`${t.base}/manifest.webmanifest`)).json()
+    assert.equal(plain.start_url, './#/')
+    const paired = await (await fetch(`${t.base}/manifest.webmanifest?token=${t.cfg.token}`)).json()
+    assert.equal(paired.start_url, `./#token=${t.cfg.token}`)
+    const wrong = await (await fetch(`${t.base}/manifest.webmanifest?token=nope`)).json()
+    assert.equal(wrong.start_url, './#/')
+  })
+})
+
+describe('what a session is started with', () => {
+  it('lets Switchboard tools run without asking, and nothing else', async () => {
+    const settings = JSON.parse(fs.readFileSync(t.sessions.writeSettings(), 'utf8'))
+    assert.deepEqual(settings.permissions, { allow: ['mcp__switchboard'] })
+    for (const event of ['SessionStart', 'UserPromptSubmit', 'Stop', 'Notification', 'SessionEnd']) assert.ok(settings.hooks[event], event)
+  })
+
+  it('gives only the orchestrator access to the Switchboard folder', async () => {
+    const boss = t.sessions.claudeCommand({ name: 'boss', role: 'orchestrator' })
+    const worker = t.sessions.claudeCommand({ name: 'w', role: 'worker' })
+    assert.equal(boss[boss.indexOf('--add-dir') + 1], ROOT)
+    assert.ok(!worker.includes('--add-dir'))
+    for (const cmd of [boss, worker]) {
+      assert.equal(cmd[cmd.indexOf('--dangerously-load-development-channels') + 1], 'server:switchboard')
+      // --add-dir and --mcp-config take several values: each must be followed by another flag.
+      for (const flag of ['--add-dir', '--mcp-config']) {
+        const i = cmd.indexOf(flag)
+        if (i !== -1) assert.match(cmd[i + 2], /^--/, `${flag} is followed by a flag`)
+      }
+    }
+  })
+
+  it('refuses a session asking for another session with no permission checks', async () => {
+    await t.api('POST', '/api/messages', { from: 'alpha', to: 'user', body: 'alpha exists' })
+    const r = await t.api('POST', '/api/sessions', { name: 'sneaky', cwd: t.dataDir, permission_mode: 'bypassPermissions', by: 'alpha' })
+    assert.equal(r.status, 403)
+    assert.match(r.data.error, /Only the human/)
+  })
+})
+
 describe('sessions in tmux', () => {
   it('starts a session, answers its startup dialogs, delivers the first prompt, and stops it', async () => {
     const work = fs.mkdtempSync(path.join(t.dataDir, 'work-'))
@@ -296,6 +337,14 @@ describe('sessions in tmux', () => {
     await waitFor(() => fs.readFileSync(events, 'utf8').includes('TYPED typed from the phone'), 'keys typed into the terminal')
     const screen = (await t.api('GET', '/api/sessions/worker1/screen')).data.screen
     assert.match(screen, /Fake Claude Code/)
+
+    // A tool approval on its screen is the human's to answer: another session's keys are refused, yours are not.
+    await t.api('POST', '/api/sessions/worker1/keys', { text: '/approve-me', enter: true })
+    await waitFor(async () => /Do you want to proceed/.test((await t.api('GET', '/api/sessions/worker1/screen')).data.screen), 'the approval on screen')
+    const refused = await t.api('POST', '/api/sessions/worker1/keys', { keys: ['1'], by: 'alpha' })
+    assert.equal(refused.status, 403)
+    assert.match(refused.data.error, /tool approval/)
+    assert.equal((await t.api('POST', '/api/sessions/worker1/keys', { keys: ['Enter'] })).status, 200)
 
     const dup = await t.api('POST', '/api/sessions', { name: 'worker1', cwd: work })
     assert.equal(dup.status, 400, 'no second session with the same name')

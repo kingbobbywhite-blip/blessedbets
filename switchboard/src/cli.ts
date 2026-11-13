@@ -12,6 +12,7 @@ import { parseArgs } from 'node:util'
 import QRCode from 'qrcode'
 import { isExampleUrl, loadConfig, PACKAGE_ROOT, setEnvVar, type Config } from './hub/config.ts'
 import { Tmux, shellQuote } from './hub/tmux.ts'
+import { formatCheck, probeTools, toolChecks } from './preflight.ts'
 import { updateIdFor, updatesRoot } from './hub/updates.ts'
 import type { Message, SearchHit, Session, Task } from './shared/protocol.ts'
 
@@ -60,7 +61,7 @@ Phone app
 
 const cfg = loadConfig(process.env, { quiet: true })
 const base = `http://${cfg.host === '0.0.0.0' || cfg.host === '::' ? '127.0.0.1' : cfg.host}:${cfg.port}`
-const tmux = new Tmux(process.env.SWITCHBOARD_TMUX_SOCKET || '')
+const tmux = new Tmux(process.env.SWITCHBOARD_TMUX_SOCKET || '', cfg.tmuxBin)
 const HUB_TMUX = `${cfg.tmuxPrefix}hub`
 
 async function api<T = any>(method: string, p: string, body?: unknown, timeoutMs = 160_000): Promise<T> {
@@ -122,12 +123,19 @@ switch (cmd) {
     break
 
   case 'up': {
-    if (!(await tmux.available())) fail('tmux is not installed (brew install tmux / apt install tmux)')
+    // Everything that is missing, at once, each with the command that fixes it.
+    const missing = toolChecks(probeTools(cfg)).filter(c => c.blocking && !c.ok)
+    if (missing.length) {
+      console.log(`Switchboard cannot start yet. ${missing.length === 1 ? 'One thing is' : `${missing.length} things are`} missing on this computer:\n`)
+      for (const c of missing) console.log(formatCheck(c).join('\n') + '\n')
+      console.log('Paste each command above into this terminal, one at a time, then run: switchboard up')
+      process.exit(1)
+    }
     if (!(await hubUp())) {
       if (await tmux.has(HUB_TMUX)) await tmux.kill(HUB_TMUX)
       const env: Record<string, string> = {}
       for (const [k, v] of Object.entries(process.env)) {
-        if (v && (/^(SWITCHBOARD_|STT_|DATABASE_URL$|OPENAI_API_KEY$|GROQ_API_KEY$|CLAUDE_BIN$|EXPO_ACCESS_TOKEN$|PATH$|HOME$|LANG$)/.test(k))) env[k] = v
+        if (v && (/^(SWITCHBOARD_|STT_|DATABASE_URL$|OPENAI_API_KEY$|GROQ_API_KEY$|CLAUDE_BIN$|TMUX_BIN$|EXPO_ACCESS_TOKEN$|PATH$|HOME$|LANG$|LC_ALL$)/.test(k))) env[k] = v
       }
       await tmux.newSession({ name: HUB_TMUX, cwd: PACKAGE_ROOT, command: [process.execPath, path.join(PACKAGE_ROOT, 'src/hub/main.ts')], env })
       process.stdout.write('Starting the hub')
@@ -211,7 +219,8 @@ switch (cmd) {
     const [name, ...words] = rest
     if (!name || !words.length) fail('usage: switchboard send <name> <text...>')
     const m = await api<Message>('POST', '/api/messages', { to: name, body: words.join(' '), meta: { via: 'cli' } })
-    console.log(`sent (#${m.id})${m.delivered_at ? '' : ', queued until the session connects'}`)
+    const target = await api<Session>('GET', `/api/sessions/${name}`)
+    console.log(`sent (#${m.id})${target.connected ? '' : `, and it will be pushed in as soon as ${name} is connected`}`)
     break
   }
 
@@ -244,7 +253,7 @@ switch (cmd) {
     const name = rest[0] ?? cfg.orchestrator
     const target = name === 'hub' ? HUB_TMUX : `${cfg.tmuxPrefix}${name}`
     const args = [...(process.env.SWITCHBOARD_TMUX_SOCKET ? ['-L', process.env.SWITCHBOARD_TMUX_SOCKET] : []), process.env.TMUX ? 'switch-client' : 'attach', '-t', target]
-    const r = spawnSync('tmux', args, { stdio: 'inherit' })
+    const r = spawnSync(cfg.tmuxBin, args, { stdio: 'inherit' })
     process.exit(r.status ?? 0)
   }
 
@@ -412,6 +421,7 @@ switch (cmd) {
     if (r.status !== 0) fail('claude mcp add failed')
     console.log(`\nNow start any session with the channel switched on:\n\n  claude --dangerously-load-development-channels server:switchboard\n`)
     console.log('It names itself after its tmux session or folder; set SWITCHBOARD_SESSION=<name> to choose.')
+    console.log('The first time it answers you it asks to use its reply tool: choose "Yes, and don\'t ask again".')
     break
   }
 
@@ -432,17 +442,7 @@ async function doctor(c: Config) {
   const ok = (label: string, good: boolean, detail: string) => console.log(`${good ? '✓' : '✗'} ${label.padEnd(18)} ${detail}`)
   const nodeOk = Number(process.versions.node.split('.')[0]) > 22 || (process.versions.node.startsWith('22.') && Number(process.versions.node.split('.')[1]) >= 18)
   ok('Node', nodeOk, process.versions.node + (nodeOk ? '' : ' (need 22.18 or newer)'))
-  const t = await tmux.available()
-  ok('tmux', Boolean(t), t ?? 'not found')
-  let claudeVersion = ''
-  try {
-    claudeVersion = execFileSync(c.claudeBin, ['--version'], { encoding: 'utf8', timeout: 15000 }).trim()
-  } catch {
-    claudeVersion = ''
-  }
-  const m = /(\d+)\.(\d+)\.(\d+)/.exec(claudeVersion)
-  const channelsOk = Boolean(m && (Number(m[1]) > 2 || (Number(m[1]) === 2 && (Number(m[2]) > 1 || Number(m[3]) >= 80))))
-  ok('Claude Code', channelsOk, claudeVersion ? `${claudeVersion}${channelsOk ? '' : ' (channels need 2.1.80+)'}` : `${c.claudeBin} not found`)
+  for (const check of toolChecks(probeTools(c))) console.log(formatCheck(check).join('\n'))
   const up = await hubUp()
   ok('Hub', up, up ? base : `not running at ${base} (switchboard up)`)
   if (up) {

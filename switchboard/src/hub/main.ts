@@ -13,7 +13,7 @@ export async function startHub(env: NodeJS.ProcessEnv = process.env) {
   const db = await openDatabase(cfg, log)
   const bus = new Bus()
   const hub = new Hub(cfg, db.pool, bus, log)
-  const tmux = new Tmux(env.SWITCHBOARD_TMUX_SOCKET || '')
+  const tmux = new Tmux(env.SWITCHBOARD_TMUX_SOCKET || '', cfg.tmuxBin)
   const sessions = new SessionManager(hub, tmux)
   const app = await buildServer(hub, sessions)
 

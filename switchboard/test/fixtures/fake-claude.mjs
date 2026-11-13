@@ -12,6 +12,15 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { z } from 'zod'
 
 const args = process.argv.slice(2)
+// The two questions `switchboard up` and `switchboard doctor` ask before starting anything.
+if (args[0] === '--version') {
+  console.log('2.1.999 (Fake Claude Code)')
+  process.exit(0)
+}
+if (args[0] === 'auth' && args[1] === 'status') {
+  console.log(JSON.stringify({ loggedIn: process.env.FAKE_CLAUDE_LOGGED_OUT ? false : true }))
+  process.exit(process.env.FAKE_CLAUDE_LOGGED_OUT ? 1 : 0)
+}
 const flag = name => {
   const i = args.indexOf(name)
   return i === -1 ? null : args[i + 1]
@@ -104,6 +113,11 @@ keyHandler = data => {
     if (input.trim() === '/exit') {
       for (const { client } of clients) client.close().catch(() => {})
       process.exit(0)
+    }
+    if (input.trim() === '/approve-me') {
+      // What a real tool approval looks like on screen.
+      log('Bash command\n  rm -rf build\nDo you want to proceed?\n❯ 1. Yes\n  2. Yes, and don\'t ask again for rm commands\n  3. No, and tell Claude what to do differently (esc)')
+      return
     }
     if (input) log(`> ${input}`)
     fs.appendFileSync(process.env.FAKE_CLAUDE_EVENTS ?? '/dev/null', `TYPED ${input}\n`)

@@ -28,6 +28,9 @@ export class NotFound extends Error {
 export class BadRequest extends Error {
   statusCode = 400
 }
+export class Forbidden extends Error {
+  statusCode = 403
+}
 
 // ---------------------------------------------------------------------------
 // Sessions

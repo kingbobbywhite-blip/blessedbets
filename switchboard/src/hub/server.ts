@@ -56,7 +56,11 @@ export async function buildServer(hub: Hub, sessions: SessionManager, opts: { lo
     reply.header('x-frame-options', 'DENY')
     reply.header('permissions-policy', 'microphone=(self), geolocation=(self), camera=(), payment=()')
     const type = String(reply.getHeader('content-type') ?? '')
-    if (type.startsWith('text/html')) reply.header('content-security-policy', contentSecurityPolicy(cfg.packageRoot, req.headers.host))
+    if (type.startsWith('text/html')) {
+      const forwarded = String(req.headers['x-forwarded-host'] ?? '').split(',')[0].trim()
+      const hosts = [req.headers.host, forwarded, cfg.publicUrl ? new URL(cfg.publicUrl).host : '']
+      reply.header('content-security-policy', contentSecurityPolicy(cfg.packageRoot, hosts))
+    }
     return payload
   })
 
@@ -78,6 +82,14 @@ export async function buildServer(hub: Hub, sessions: SessionManager, opts: { lo
     const file = path.join(cfg.packageRoot, 'node_modules', rel)
     reply.header('content-type', 'text/javascript; charset=utf-8').header('cache-control', 'public, max-age=86400')
     return reply.send(fs.createReadStream(file))
+  })
+  // Added to a phone's home screen, the page gets storage of its own and would open unpaired.
+  // A paired page asks for the manifest with its token, and gets back a start address that carries it.
+  app.get('/manifest.webmanifest', async (req: Req, reply) => {
+    const manifest = JSON.parse(fs.readFileSync(path.join(cfg.packageRoot, 'web', 'manifest.webmanifest'), 'utf8')) as Record<string, unknown>
+    if (tokenMatches(cfg.token, req.query.token)) manifest.start_url = `./#token=${encodeURIComponent(cfg.token)}`
+    reply.header('content-type', 'application/manifest+json; charset=utf-8').header('cache-control', 'no-store')
+    return manifest
   })
   await app.register(fastifyStatic, {
     root: path.join(cfg.packageRoot, 'web'),
@@ -157,11 +169,15 @@ export async function buildServer(hub: Hub, sessions: SessionManager, opts: { lo
   }))
   app.post('/api/sessions/:name/keys', async (req: Req) => {
     const b = bodyOf(req)
-    await sessions.sendKeys(req.params.name, {
-      keys: Array.isArray(b.keys) ? b.keys.map(String) : undefined,
-      text: typeof b.text === 'string' ? b.text : undefined,
-      enter: b.enter === true,
-    })
+    await sessions.sendKeys(
+      req.params.name,
+      {
+        keys: Array.isArray(b.keys) ? b.keys.map(String) : undefined,
+        text: typeof b.text === 'string' ? b.text : undefined,
+        enter: b.enter === true,
+      },
+      actorOf(b),
+    )
     return { ok: true }
   })
   app.post('/api/sessions/:name/read', async (req: Req) => {
@@ -529,7 +545,7 @@ async function handleUiSocket(hub: Hub, socket: WebSocket, q: Record<string, str
 let importMapHash: { mtimeMs: number; hash: string } | null = null
 
 /** The policy for the web UI, with the hash of index.html's inline import map. */
-export function contentSecurityPolicy(packageRoot: string, host: string | undefined): string {
+export function contentSecurityPolicy(packageRoot: string, hosts: (string | undefined)[]): string {
   const index = path.join(packageRoot, 'web', 'index.html')
   const stat = fs.statSync(index)
   if (!importMapHash || importMapHash.mtimeMs !== stat.mtimeMs) {
@@ -537,7 +553,10 @@ export function contentSecurityPolicy(packageRoot: string, host: string | undefi
     const map = /<script type="importmap">([\s\S]*?)<\/script>/.exec(html)?.[1] ?? ''
     importMapHash = { mtimeMs: stat.mtimeMs, hash: crypto.createHash('sha256').update(map).digest('base64') }
   }
-  const self = host && /^[a-z0-9.:[\]-]+$/i.test(host) ? ` ws://${host} wss://${host}` : ''
+  // Older Safari does not count this page's own WebSocket address as 'self', so name it: as the
+  // browser asked for it, as a proxy in front (tailscale serve) reports it, and as configured.
+  const names = [...new Set(hosts.filter((h): h is string => Boolean(h) && /^[a-z0-9.:[\]-]+$/i.test(h!)))]
+  const self = names.map(h => ` ws://${h} wss://${h}`).join('')
   return [
     "default-src 'self'",
     `script-src 'self' 'sha256-${importMapHash.hash}'`,

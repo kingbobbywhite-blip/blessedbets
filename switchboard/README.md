@@ -182,7 +182,11 @@ without anything being opened to the internet.
 switchboard up
 ```
 
-This starts the hub in a tmux session (`sb-hub`) and the orchestrator session (`sb-boss`,
+It first checks that tmux and Claude Code are installed and logged in. If something is missing
+it stops and prints the exact command for each thing: paste those, then run it again.
+(`switchboard doctor` shows the same checks, plus the rest, any time.)
+
+It then starts the hub in a tmux session (`sb-hub`) and the orchestrator session (`sb-boss`,
 working in `switchboard/orchestrator`, whose `CLAUDE.md` tells it how to run things). The
 first time, Claude Code asks you to confirm "development channels" (custom channels are not
 on Anthropic's allowlist during the preview) and to trust the folder; the hub answers both
@@ -201,8 +205,11 @@ switchboard pair
 
 prints two QR codes in the terminal. Point your phone's **camera** at the second one
 ("Browser"): it opens Switchboard in the phone's browser, already signed in. Then Share →
-**Add to Home Screen** so it opens like an app. That is enough to chat, approve tool use, read
-the backlog and talk by voice with the screen on.
+**Add to Home Screen** so it opens like an app; the icon stays signed in. That is enough to
+chat, approve tool use, read the backlog and talk by voice with the screen on.
+
+If the codes are hard to scan off the terminal, open the link `switchboard up` printed on the
+computer and go to **Settings**: the same two codes are there, larger.
 
 The first QR code is for the Switchboard phone app ([below](#the-phone-app)), which is what
 keeps listening with the phone locked in your pocket.
@@ -240,6 +247,8 @@ claude --dangerously-load-development-channels server:switchboard
 ```
 
 They name themselves after their tmux session or folder (`SWITCHBOARD_SESSION=name` to choose).
+The first time one answers you, Claude Code asks whether it may use its `reply` tool: choose
+"Yes, and don't ask again". Sessions the hub starts are set up not to ask.
 
 ## The phone app
 
@@ -398,6 +407,12 @@ the session's own transcript, so Claude really has it).
   through this one, and every message is labelled with who sent it.
 - Approving a tool from your phone is the same as approving it in the terminal. Approvals by
   voice only count right after an approval was read out.
+- Approvals stay with you. Sessions the hub starts may use Switchboard's own tools (reply,
+  message each other, the backlog, your phone) without asking, so they can answer you while you
+  are out. Everything else (running commands, editing files, the web) still asks, and the
+  question comes to you. A session cannot answer another session's approval or safety question
+  by typing into its terminal, and cannot start a session that skips permission checks; the
+  hub refuses both. The "no permission checks" warning is never answered for you.
 - The app-update files are served without the token (they hold no secrets) so a phone can
   update before it is paired. `SWITCHBOARD_UPDATES_PUBLIC=0` requires the token for them too.
 - The orchestrator is told never to place trades, move money or change financial account
@@ -414,6 +429,11 @@ the session's own transcript, so Claude really has it).
 - **Messages arrive but nothing happens.** Channels need Claude Code 2.1.80+, a claude.ai or
   Console login, and on Team/Enterprise plans the admin setting. The terminal shows
   `Channels (experimental)` under the banner when it is working.
+- **"This browser cannot turn speech into text here."** On an iPhone, the home-screen icon has
+  no speech recognition of its own (Safari does, with Dictation on). Add `GROQ_API_KEY=...` or
+  `OPENAI_API_KEY=...` to `switchboard/.env` and restart the hub (`switchboard down &&
+  switchboard up`), and the hub does the transcribing for every device. The phone app does not
+  need this.
 - **Flic does nothing.** Walk mode must be open on the phone, and the phone must reach the hub:
   open the Flic link in the phone's browser; it should answer `{"ok":true,...}`.
 - **No sound when the phone is locked (iPhone).** Start walk mode while the app is open; iOS
