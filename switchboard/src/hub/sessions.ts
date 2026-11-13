@@ -7,7 +7,7 @@ import type { Hub } from './hub.ts'
 import * as store from './store.ts'
 import { BadRequest, Forbidden, NotFound } from './store.ts'
 import { Tmux, sleep } from './tmux.ts'
-import { expandHome } from './config.ts'
+import { expandHome, findClaude } from './config.ts'
 
 export interface SpawnOptions {
   name: string
@@ -123,7 +123,7 @@ export class SessionManager {
 
   claudeCommand(s: { name: string; role: SessionRole; model?: string | null; permission_mode?: string | null; resume?: string | null; extra_args?: string[] }): string[] {
     const args = [
-      this.cfg.claudeBin,
+      findClaude(this.cfg),
       '--mcp-config',
       this.writeMcpConfig(s.name, s.role),
       '--settings',
@@ -249,10 +249,19 @@ export class SessionManager {
         return { session, ready: false, note: `The tmux session ${tmuxName} closed during startup.` }
       }
       if (await this.tmux.paneDead(tmuxName)) {
-        screen = await this.tmux.capture(tmuxName, 50).catch(() => '')
-        await store.updateSession(this.hub.db, name, { status: 'exited' })
+        screen = (await this.tmux.capture(tmuxName, 50).catch(() => '')).replace(/\n{3,}/g, '\n\n')
+        const notInstalled = /command not found|No such file or directory|not found: /i.test(screen)
+        await store.updateSession(this.hub.db, name, { status: 'exited', status_text: notInstalled ? 'Claude Code is not installed' : 'Exited during startup' })
         const session = (await this.hub.publishSession(name))!
-        return { session, ready: false, note: 'Claude Code exited during startup. The last screen is below.', screen }
+        return {
+          session,
+          ready: false,
+          note: notInstalled
+            ? `Claude Code is not installed on this computer (or not where Switchboard looks: ${findClaude(this.cfg)}). ` +
+              'In a terminal there, run "switchboard doctor": it prints the command that installs it.'
+            : 'Claude Code exited during startup. The last screen is below.',
+          screen,
+        }
       }
       screen = await this.tmux.capture(tmuxName).catch(() => '')
       const dialog = detectDialog(screen, { autoAccept: this.cfg.autoAcceptDialogs })

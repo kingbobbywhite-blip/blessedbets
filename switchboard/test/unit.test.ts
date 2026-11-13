@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { codeStamp, isExampleUrl, resolveBin, setEnvVar, splitArgs, tokenMatches } from '../src/hub/config.ts'
+import { codeStamp, findClaude, isExampleUrl, resolveBin, setEnvVar, splitArgs, tokenMatches } from '../src/hub/config.ts'
 import jsQRModule from 'jsqr'
 import { formatCheck, toolChecks, type ToolProbe } from '../src/preflight.ts'
 import { pairingPage, terminalQr, terminalQrFor } from '../src/qr.ts'
@@ -186,6 +186,20 @@ describe('small helpers', () => {
     assert.equal(resolveBin('sometool', [], { PATH: dir }), 'sometool', 'bare name when the PATH has it')
     assert.equal(resolveBin('sometool', [], { PATH: '/nonexistent' }), 'sometool', 'bare name when it is nowhere')
     assert.equal(resolveBin('/abs/tool', [dir], { PATH: dir }), '/abs/tool')
+  })
+  it('finds Claude Code installed after the hub started', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-home-'))
+    const env = { PATH: '/nonexistent', HOME: home }
+    const realHome = process.env.HOME
+    process.env.HOME = home // ~/.local/bin is looked up under the current home
+    try {
+      assert.equal(findClaude({ claudeSetting: 'claude' }, env), 'claude', 'not installed yet')
+      fs.mkdirSync(path.join(home, '.local', 'bin'), { recursive: true })
+      fs.writeFileSync(path.join(home, '.local', 'bin', 'claude'), '#!/bin/sh\n', { mode: 0o755 })
+      assert.equal(findClaude({ claudeSetting: 'claude' }, env), path.join(home, '.local', 'bin', 'claude'), 'found where its installer puts it')
+    } finally {
+      process.env.HOME = realHome
+    }
   })
   it('fingerprints the code, separately for the hub and for what runs inside sessions', () => {
     assert.match(codeStamp('hub'), /^[0-9a-f]{12}$/)

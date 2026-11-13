@@ -148,8 +148,12 @@ switch (cmd) {
 
   case 'up': {
     // Everything that is missing, at once, each with the command that fixes it.
-    const missing = toolChecks(probeTools(cfg)).filter(c => c.blocking && !c.ok)
-    if (missing.length) {
+    const checks = toolChecks(probeTools(cfg))
+    const missing = checks.filter(c => c.blocking && !c.ok)
+    // The hub itself only needs tmux. Without Claude Code it still runs (the web UI, pairing a
+    // phone, the backlog); what cannot happen yet is starting a session.
+    const hubBlocked = missing.some(c => c.label === 'tmux')
+    if (hubBlocked) {
       console.log(`Switchboard cannot start yet. ${missing.length === 1 ? 'One thing is' : `${missing.length} things are`} missing on this computer:\n`)
       for (const c of missing) console.log(formatCheck(c).join('\n') + '\n')
       console.log('Paste each command above into this terminal, one at a time, then run: switchboard up')
@@ -185,6 +189,14 @@ switch (cmd) {
         console.log(await tmux.capture(HUB_TMUX, 40).catch(() => ''))
         fail(`The hub did not start. Its terminal is above (tmux attach -t ${HUB_TMUX}).`)
       }
+    }
+    if (missing.length) {
+      console.log(`The hub is running, but it cannot start a Claude Code session yet:\n`)
+      for (const c of missing) console.log(formatCheck(c).join('\n') + '\n')
+      console.log('Paste each command above into this terminal, one at a time, then run: switchboard up')
+      console.log(`\nMeanwhile the web UI works: ${base}/#token=${cfg.token}`)
+      console.log(cfg.publicUrl && !isExampleUrl(cfg.publicUrl) ? 'And you can pair your phone now: switchboard pair' : 'To pair your phone, run switchboard tailscale first, then switchboard pair')
+      process.exit(1)
     }
     const sessions = await api<Session[]>('GET', '/api/sessions')
     const boss = sessions.find(s => s.name === cfg.orchestrator)

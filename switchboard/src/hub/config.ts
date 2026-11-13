@@ -26,8 +26,10 @@ export interface Config {
   tmuxPrefix: string
   /** `tmux`, or its full path when it is installed somewhere the shell's PATH does not cover. */
   tmuxBin: string
-  /** `claude`, or its full path (same reason). */
+  /** `claude`, or its full path (same reason), as found when this config was loaded. */
   claudeBin: string
+  /** What to look for: `claude`, or CLAUDE_BIN. The hub looks again each time it starts a session. */
+  claudeSetting: string
   claudeArgs: string[]
   /** Name of the session that runs everything else. */
   orchestrator: string
@@ -77,6 +79,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, opts: { quiet?:
     tmuxPrefix: env.SWITCHBOARD_TMUX_PREFIX || 'sb-',
     tmuxBin: resolveBin(env.TMUX_BIN || 'tmux', TMUX_DIRS, env),
     claudeBin: resolveBin(env.CLAUDE_BIN || 'claude', CLAUDE_DIRS, env),
+    claudeSetting: env.CLAUDE_BIN || 'claude',
     claudeArgs: splitArgs(env.SWITCHBOARD_CLAUDE_ARGS || ''),
     orchestrator: env.SWITCHBOARD_ORCHESTRATOR || 'boss',
     orchestratorCwd: path.resolve(expandHome(env.SWITCHBOARD_ORCHESTRATOR_CWD || path.join(PACKAGE_ROOT, 'orchestrator'))),
@@ -108,6 +111,14 @@ export function resolveBin(name: string, dirs: string[], env: NodeJS.ProcessEnv 
     if (isExecutable(full)) return full
   }
   return name
+}
+
+/**
+ * Where Claude Code is right now. The hub is often started before Claude Code is installed
+ * (that is how a first setup goes), so it must not remember "not found" from its own start.
+ */
+export function findClaude(cfg: Pick<Config, 'claudeSetting'>, env: NodeJS.ProcessEnv = process.env): string {
+  return resolveBin(cfg.claudeSetting, CLAUDE_DIRS, env)
 }
 
 export function findOnPath(name: string, env: NodeJS.ProcessEnv = process.env): string | null {
