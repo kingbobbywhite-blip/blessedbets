@@ -1,3 +1,5 @@
+import { MONEY_SCHEMA } from '../money/schema.ts'
+
 /**
  * Postgres schema, as an append-only list of migrations. Never edit an entry
  * that has shipped; add a new one.
@@ -173,4 +175,5 @@ create table settings (
   updated_at timestamptz not null default now()
 );
 `,
+  /* 2: the money side */ MONEY_SCHEMA,
 ]
